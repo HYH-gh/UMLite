@@ -1,0 +1,2542 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UMLite · 文本驱动 UML 绘图工具</title>
+<style>
+  :root{
+    --bg:#f4f6fb; --panel:#fff; --border:#dde4ee; --text:#1e293b;
+    --muted:#64748b; --accent:#4f6ef7; --accent2:#7c3aed;
+    --ok:#059669; --err:#dc2626;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    background:var(--bg);color:var(--text);display:flex;flex-direction:column;overflow:hidden;
+  }
+  header{
+    display:flex;align-items:center;gap:10px;padding:8px 16px;background:var(--panel);
+    border-bottom:1px solid var(--border);flex:0 0 auto;flex-wrap:wrap;
+  }
+  .logo{font-weight:800;font-size:16px;letter-spacing:.5px;
+    background:linear-gradient(90deg,var(--accent),var(--accent2));
+    -webkit-background-clip:text;background-clip:text;color:transparent;}
+  .logo small{font-weight:400;font-size:11px;color:var(--muted);-webkit-text-fill-color:var(--muted);margin-left:6px;}
+  .spacer{flex:1;}
+  select,button{
+    font-family:inherit;font-size:12.5px;padding:6px 12px;border-radius:7px;
+    border:1px solid var(--border);background:#fff;color:var(--text);cursor:pointer;
+    transition:.15s;white-space:nowrap;
+  }
+  button:hover{border-color:var(--accent);color:var(--accent);}
+  button.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
+  button.primary:hover{background:#3f5ce0;color:#fff;}
+  button.ghost{background:#f8fafc;}
+  main{flex:1;display:flex;min-height:0;}
+  .pane{display:flex;flex-direction:column;min-width:0;min-height:0;}
+  #left{width:var(--left-width,44%);background:#fff;}
+  #right{flex:1;background:
+     linear-gradient(90deg,rgba(0,0,0,.025) 1px,transparent 1px) 0 0/22px 22px,
+     linear-gradient(rgba(0,0,0,.025) 1px,transparent 1px) 0 0/22px 22px, #fbfcfe;
+     position:relative;}
+  .pane-head{
+    flex:0 0 auto;padding:6px 14px;font-size:11.5px;color:var(--muted);
+    border-bottom:1px solid var(--border);background:#fafbfe;
+    display:flex;align-items:center;gap:8px;letter-spacing:.3px;
+  }
+  .pane-head .zoominfo{margin-left:auto;font-family:"SF Mono",Menlo,Consolas,monospace;color:#94a3b8;}
+  #editor{
+    flex:1;width:100%;border:0;outline:0;resize:none;padding:14px 16px;
+    font-family:"SF Mono",Menlo,Consolas,"Cascadia Code","Microsoft YaHei",monospace;
+    font-size:13px;line-height:1.65;color:#0f172a;background:#fff;tab-size:2;
+  }
+  #preview{
+    flex:1;overflow:hidden;position:relative;cursor:default;
+    display:block;
+  }
+  #preview svg{display:block;user-select:none;}
+  #status{
+    flex:0 0 auto;padding:6px 14px;font-size:12px;border-top:1px solid var(--border);
+    background:#fafbfe;color:var(--muted);font-family:"SF Mono",Menlo,Consolas,monospace;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  #status.ok{color:var(--ok);} #status.err{color:var(--err);background:#fef2f2;}
+  .divider{
+    width:5px;cursor:col-resize;flex:0 0 auto;background:var(--border);
+    position:relative;z-index:10;transition:background .15s;
+  }
+  .divider:hover,.divider.active{background:var(--accent);}
+  .hint{font-size:11px;color:var(--muted);}
+  .badge{
+    display:inline-block;padding:1px 7px;border-radius:20px;background:#eef2ff;
+    color:#4f46e5;font-size:10.5px;font-weight:600;letter-spacing:.2px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">UMLite<small>文本驱动 UML 绘图</small></div>
+  <select id="samples" title="载入示例"></select>
+  <div class="spacer"></div>
+  <button class="ghost" id="btn-doc">📖 下载语言文档 (.md)</button>
+  <button id="btn-copy">复制代码</button>
+  <button id="btn-src">下载 .uml</button>
+  <button id="btn-svg">下载 SVG</button>
+  <button class="primary" id="btn-png">下载 PNG</button>
+</header>
+
+<main>
+  <div class="pane" id="left">
+    <div class="pane-head">📝 源代码 <span class="hint">支持 class / usecase / activity / er / sequence / state / component / deployment / object / package</span></div>
+    <textarea id="editor" spellcheck="false"></textarea>
+  </div>
+  <div class="divider" id="divider"></div>
+  <div class="pane" id="right">
+    <div class="pane-head">
+      👁 预览
+      <span class="badge">滚轮缩放</span>
+      <span class="badge">拖拽元素</span>
+      <span class="badge">空白处拖拽平移</span>
+      <button id="btn-reset" style="padding:3px 10px;font-size:11.5px;">⟲ 复位视图</button>
+      <button id="btn-refresh" style="padding:3px 10px;font-size:11.5px;">⟳ 刷新渲染</button>
+      <span class="zoominfo" id="zoominfo">100%</span>
+    </div>
+    <div id="preview"></div>
+  </div>
+</main>
+
+<div id="status">就绪</div>
+
+<!-- ============================================================
+     语言规范文档（Markdown），以脚本块形式内嵌，避免转义问题
+     ============================================================ -->
+<script type="text/markdown" id="spec-doc">
+# UMLite 语言规范 v1.0
+
+> **UMLite** 是一种文本驱动的 UML 绘图语言。一份 `.uml` 文档由「图类型声明」与「语句体」两部分组成，
+> 解析器读取文档后直接生成对应的 UML 图形。
+
+---
+
+## 1. 文档结构
+
+```
+@diagram <类型> ["图标题"]
+
+<语句 1>
+<语句 2>
+...
+```
+
+| 规则 | 说明 |
+|---|---|
+| 首行 | **必须**是 `@diagram` 声明 |
+| 图标题 | 可选，用双引号包裹 |
+| 空行 | 忽略 |
+| 注释 | 以 `//` 或 `#` 开头的整行 |
+| 缩进 | 无意义，解析前会被去除首尾空白 |
+| 标识符 | 含空格或特殊字符时用双引号包裹，如 `"订单 服务"` |
+
+### 1.1 图类型关键字
+
+| 类型关键字 | 对应 UML 图 | 可用别名 |
+|---|---|---|
+| `class` | 类图 | `classdiagram`、`类图` |
+| `usecase` | 用例图 | `用例图` |
+| `activity` | 活动图 | `活动图` |
+| `er` | E-R 图 | `erdiagram`、`实体关系图`、`er图` |
+| `sequence` | 时序图 | `时序图`、`序列图` |
+| `state` | 状态图 | `状态图`、`statechart` |
+| `component` | 组件图 | `组件图` |
+| `deployment` | 部署图 | `部署图` |
+| `object` | 对象图 | `对象图` |
+| `package` | 包图 | `包图` |
+
+---
+
+## 2. 关系运算符总览
+
+所有图类型共享同一套关系运算符（部分图类型有专用运算符，见各章节）。
+
+| 运算符 | 名称 | 语义 | 线型 |
+|---|---|---|---|
+| `--` | 关联 | 一般关联 | 实线，无箭头 |
+| `-->` | 有向关联 | 有方向的一般关联 | 实线，开箭头 |
+| `--\|>` | 继承 / 泛化 | is-a 关系 | 实线，空心三角 |
+| `..\|>` | 实现 | 接口实现 | 虚线，空心三角 |
+| `..>` | 依赖 | 使用关系 | 虚线，开箭头 |
+| `*--` | 组合 | 强聚合，整体-部分 | 实线，实心菱形（在左端） |
+| `o--` | 聚合 | 弱聚合，整体-部分 | 实线，空心菱形（在左端） |
+| `..` | 虚线关联 | 弱关联 | 虚线，无箭头 |
+
+### 2.1 反向箭头
+
+以下反向写法会被自动规整为正向：
+
+```
+<--  →  -->          <|-- →  --|>
+<|.. →  ..|>         <..  →  ..>
+<-   →  ->           --*  →  *--        --o  →  o--
+```
+
+### 2.2 边的修饰
+
+关系行可以在端点处添加**多重度**，在末尾添加**标签**：
+
+```
+A "1" --> "0..*" B : 关联标签
+```
+
+- 左多重度写在左端点标识符**之后**，用双引号包裹。
+- 右多重度写在右端点标识符**之前**，用双引号包裹。
+- 标签写在整行**末尾**，以冒号 `:` 引导。
+- 三段均可省略。
+
+---
+
+## 3. 类图（class）
+
+### 3.1 节点声明
+
+```
+<关键字> <名称> [{
+    <成员 1>
+    <成员 2>
+}]
+```
+
+支持的声明关键字：
+
+| 关键字 | 含义 |
+|---|---|
+| `class` | 类 |
+| `abstract class` | 抽象类（标题前显示 «abstract»） |
+| `interface` | 接口 |
+| `enum` | 枚举 |
+| `struct` | 结构体 |
+| `annotation` | 注解 |
+| `trait` | 特征 |
+
+成员行的文本会被原样显示在类框中，建议使用 UML 可见性前缀：
+
+| 前缀 | 可见性 |
+|---|---|
+| `+` | public |
+| `-` | private |
+| `#` | protected |
+| `~` | package |
+
+### 3.2 示例
+
+```
+@diagram class "电商系统类图"
+
+abstract class BaseEntity {
+    # id: String
+    # createdAt: Date
+    + getId(): String
+}
+
+interface Payable {
+    + pay(amount: Double): Boolean
+}
+
+class User {
+    - username: String
+    + login(pwd: String): Boolean
+}
+
+class Order {
+    + orderNo: String
+    + total: Double
+}
+
+class OrderItem {
+    + qty: Int
+}
+
+enum OrderStatus {
+    PENDING
+    PAID
+}
+
+User "1" --> "*" Order : 下单
+Order "1" *-- "1..*" OrderItem : 包含
+Order ..|> Payable : 实现
+User --|> BaseEntity : 继承
+Order --> OrderStatus : 状态
+```
+
+### 3.3 隐式声明
+
+在关系行中直接引用的名称，如果此前未声明，会自动创建为一个空类节点。因此下面两段等价：
+
+```
+User --> Order
+```
+
+```
+class User
+class Order
+User --> Order
+```
+
+---
+
+## 4. 用例图（usecase）
+
+### 4.1 语法
+
+```
+boundary "系统名称"
+usecase <用例名> [:boundary]
+actor <角色名>
+<角色> --> <用例>
+<用例> ..> <用例> : «include» | «extend»
+```
+
+- `boundary` 声明系统边界框（可选的），系统名称显示在虚线矩形的左上角。
+- `usecase` 后加 `:boundary` 后缀标记此用例属于系统内部，会被包裹在边界框内。
+- 未加 `:boundary` 的 `usecase` 和所有 `actor` 默认渲染在边界框**外部**。
+- 角色与用例之间常用 `-->`（关联）。
+- 用例之间常用 `..>` 并标注 `«include»` / `«extend»`。
+
+### 4.2 示例（含系统边界）
+
+```
+@diagram usecase "图书馆管理系统用例图"
+
+boundary "图书管理系统"
+
+actor 读者
+actor 管理员
+
+usecase 查询图书 :boundary
+usecase 借阅图书 :boundary
+usecase 归还图书 :boundary
+usecase 管理图书 :boundary
+
+读者 --> 查询图书
+读者 --> 借阅图书
+读者 --> 归还图书
+管理员 --> 管理图书
+
+借阅图书 ..> 查询图书 : «include»
+归还图书 ..> 查询图书 : «include»
+```
+
+---
+
+## 5. 活动图（activity）
+
+活动图使用**专用语句**，不采用「节点 + 关系」的写法。
+
+### 5.1 语句一览
+
+| 语句 | 说明 |
+|---|---|
+| `start` | 起始节点（实心圆） |
+| `stop` / `end` / `end.` | 结束节点（牛眼圆） |
+| `:动作名;` | 动作节点（圆角矩形），结尾分号可省略 |
+| `if (条件)` | 判断节点（菱形），后续分支默认标注「是」 |
+| `else` | 否则分支，标注「否」 |
+| `endif` | 结束 if 块 |
+| `while (条件)` | 循环判断节点 |
+| `endwhile` | 结束循环，回边自动连回 `while` |
+| `note: 文本` | 备注节点 |
+
+### 5.2 分支结构
+
+```
+if (条件)
+    :分支 A;
+else
+    :分支 B;
+endif
+```
+
+`if` 与 `endif` 必须配对，`else` 可选。允许嵌套。
+
+### 5.3 循环结构
+
+```
+while (还有下一页?)
+    :读取一页数据;
+endwhile
+```
+
+### 5.4 示例
+
+```
+@diagram activity "订单处理流程"
+
+start
+:接收用户订单;
+:校验订单参数;
+if (库存是否充足?)
+    :锁定库存;
+    :生成支付单;
+    if (支付是否成功?)
+        :更新订单状态为已支付;
+        :通知仓库发货;
+    else
+        :释放库存;
+        :订单关闭;
+    endif
+else
+    :提示用户缺货;
+    :推荐相似商品;
+endif
+:发送结果通知;
+stop
+```
+
+---
+
+## 6. E-R 图（er）
+
+### 6.1 语法
+
+```
+entity <实体名> {
+    <字段定义>
+}
+```
+
+- `database`、`table` 关键字与 `entity` 等价。
+- 实体渲染为矩形，实体名显示在表头。
+- 关系使用 Chen 记法风格的基数运算符：
+
+| 运算符 | 含义 |
+|---|---|
+| `\|\|--o{` | 一对多（可选） |
+| `\|\|--\|{` | 一对多（强制） |
+| `\|\|--\|\|` | 一对一 |
+
+### 6.2 示例
+
+```
+@diagram er "电商数据库 E-R 图"
+
+entity 用户 {
+    * id: BIGINT «PK»
+    username: VARCHAR(50)
+    email: VARCHAR(120)
+}
+
+entity 订单 {
+    * id: BIGINT «PK»
+    user_id: BIGINT «FK»
+    total: DECIMAL(10,2)
+}
+
+entity 订单项 {
+    * id: BIGINT «PK»
+    order_id: BIGINT «FK»
+    product_id: BIGINT «FK»
+}
+
+用户 ||--o{ 订单 : "下单"
+订单 ||--|{ 订单项 : "包含"
+```
+
+---
+
+## 7. 时序图（sequence）
+
+### 7.1 语法
+
+```
+participant <显示名> [as <短名>]
+actor <显示名> [as <短名>]
+<发送方> -> <接收方> : 消息文本
+<发送方> --> <接收方> : 返回消息
+```
+
+- `participant` 与 `actor` 等价，均渲染为顶部矩形框 + 下方虚线生命线。
+- `->` 表示同步消息（实线箭头）。
+- `-->` 表示返回消息（虚线箭头）。
+- 参与者顺序按首次出现顺序排列。
+- `as` 用于给带空格的显示名指定一个简短的引用名。
+
+### 7.2 示例
+
+```
+@diagram sequence "用户登录时序图"
+
+participant 用户
+participant 浏览器 as Browser
+participant 网关 as Gateway
+participant 认证服务 as AuthService
+participant 数据库 as DB
+
+用户 -> Browser : 输入账号密码
+Browser -> Gateway : POST /api/login
+Gateway -> AuthService : 转发登录请求
+AuthService -> DB : 查询用户记录
+DB --> AuthService : 返回用户数据
+AuthService --> Gateway : 签发 JWT Token
+Gateway --> Browser : 200 OK + Token
+Browser --> 用户 : 跳转首页
+```
+
+---
+
+## 8. 状态图（state）
+
+### 8.1 语法
+
+```
+state <状态名>
+<状态 A> --> <状态 B> : 迁移事件
+[*] --> <初始状态>
+<终止状态> --> [*]
+```
+
+- `[*]` 表示伪状态：位于左侧时渲染为起始节点，位于右侧时渲染为终止节点。
+- 未显式声明的状态会自动创建。
+
+### 8.2 示例
+
+```
+@diagram state "订单状态机"
+
+[*] --> 待支付
+待支付 --> 已支付 : 支付成功
+待支付 --> 已取消 : 超时/取消
+已支付 --> 已发货 : 仓库发货
+已发货 --> 已完成 : 用户签收
+已发货 --> 退货中 : 申请退货
+退货中 --> 已退款 : 退款成功
+已取消 --> [*]
+已完成 --> [*]
+已退款 --> [*]
+```
+
+---
+
+## 9. 组件图（component）
+
+### 9.1 语法
+
+```
+component <组件名> [{
+    <成员>
+}]
+<组件 A> ..> <组件 B> : 依赖说明
+```
+
+组件与类图使用相同的节点 / 关系写法，仅样式不同（淡紫色标题栏）。
+
+### 9.2 示例
+
+```
+@diagram component "微服务架构组件图"
+
+component 网关服务 {
+    + 路由转发
+    + 鉴权过滤
+}
+
+component 用户服务 {
+    + 用户注册
+}
+
+component 订单服务 {
+    + 创建订单
+}
+
+component 数据库
+
+网关服务 ..> 用户服务 : HTTP
+网关服务 ..> 订单服务 : HTTP
+订单服务 --> 数据库 : JDBC
+```
+
+---
+
+## 10. 部署图（deployment）
+
+### 10.1 语法
+
+```
+node <节点名> [{
+    artifact <构件名>
+}]
+artifact <构件名>
+database <数据库名>
+```
+
+节点与构件均可参与关系连线。
+
+### 10.2 示例
+
+```
+@diagram deployment "生产环境部署图"
+
+node 客户端 {
+    artifact 浏览器
+    artifact 移动App
+}
+
+node 负载均衡 {
+    artifact Nginx
+}
+
+node 应用服务器 {
+    artifact 用户服务.jar
+    artifact 订单服务.jar
+}
+
+node 数据库服务器 {
+    database MySQL
+    database Redis
+}
+
+客户端 --> 负载均衡 : HTTPS
+负载均衡 --> 应用服务器 : HTTP
+应用服务器 --> 数据库服务器 : TCP
+```
+
+---
+
+## 11. 对象图（object）
+
+### 11.1 语法
+
+```
+object <对象名> [{
+    <属性> = <值>
+}]
+<对象 A> --> <对象 B> : 链接名
+```
+
+### 11.2 示例
+
+```
+@diagram object "订单对象快照"
+
+object 用户张三 {
+    id = "U1001"
+    name = "张三"
+}
+
+object 订单A {
+    orderNo = "SO20240001"
+    total = 299.00
+}
+
+用户张三 --> 订单A : 拥有
+```
+
+---
+
+## 12. 包图（package）
+
+### 12.1 语法
+
+```
+package <包名> [{
+    class <类名>
+}]
+<包 A> ..> <包 B> : 依赖说明
+```
+
+### 12.2 示例
+
+```
+@diagram package "系统分层包图"
+
+package 表现层 {
+    class UserController
+    class OrderController
+}
+
+package 业务层 {
+    class UserService
+    class OrderService
+}
+
+package 数据层 {
+    class UserRepository
+    class OrderRepository
+}
+
+表现层 ..> 业务层 : 调用
+业务层 ..> 数据层 : 调用
+```
+
+---
+
+## 13. 完整示例（综合）
+
+```
+@diagram class "订单领域模型"
+
+abstract class BaseEntity {
+    # id: String
+    # createdAt: Date
+}
+
+interface Payable {
+    + pay(amount: Double): Boolean
+}
+
+class Order {
+    + orderNo: String
+    + total: Double
+    + submit(): void
+}
+
+class OrderItem {
+    + qty: Int
+    + price: Double
+}
+
+enum OrderStatus {
+    PENDING
+    PAID
+    SHIPPED
+}
+
+Order "1" *-- "1..*" OrderItem : 包含
+Order ..|> Payable : 实现
+Order --|> BaseEntity : 继承
+Order --> OrderStatus : 状态
+```
+
+---
+
+## 14. 解析错误提示
+
+| 错误信息 | 原因 |
+|---|---|
+| `文档为空，请先写入 @diagram ...` | 文件中没有任何有效语句 |
+| `缺少图类型声明，格式应为 @diagram <类型> "标题"` | 首行不是合法的 `@diagram` 声明 |
+| `未知的图类型 "xxx"` | 类型关键字不在别名表中 |
+| `第 N 行：xxx 缺少名称` | 节点声明后没有跟标识符 |
+| `第 N 行：缺少匹配的 "}"` | 代码块未闭合 |
+| `第 N 行：else 没有匹配的 if` | 活动图中 `else` 未与 `if` 配对 |
+| `第 N 行：endif 没有匹配的 if` | 活动图中 `endif` 未与 `if` 配对 |
+| `第 N 行：endwhile 没有匹配的 while` | 活动图中 `endwhile` 未与 `while` 配对 |
+
+---
+
+*UMLite v1.0 · 文本驱动 UML 绘图工具*
+</script>
+
+<script>
+/* ==========================================================================
+ *  UMLite —— 文本驱动 UML 绘图引擎
+ * ========================================================================== */
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const FONT = '-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+
+/* ---------------- 通用工具 ---------------- */
+
+const _cvs = document.createElement('canvas');
+const _ctx = _cvs.getContext('2d');
+function textWidth(s, size = 13, weight = 'normal') {
+  _ctx.font = `${weight} ${size}px ${FONT}`;
+  return _ctx.measureText(String(s)).width;
+}
+function el(tag, attrs = {}, children = []) {
+  const e = document.createElementNS(SVG_NS, tag);
+  for (const k in attrs) {
+    if (attrs[k] === undefined || attrs[k] === null) continue;
+    e.setAttribute(k, attrs[k]);
+  }
+  for (const c of [].concat(children)) {
+    if (c === undefined || c === null) continue;
+    e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+  }
+  return e;
+}
+function styleEl(css) {
+  const s = document.createElementNS(SVG_NS, 'style');
+  s.textContent = css;
+  return s;
+}
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+/* ---------------- 解析层 ---------------- */
+
+const DIAGRAM_ALIASES = {
+  class: 'class', classdiagram: 'class', '类图': 'class',
+  usecase: 'usecase', '用例图': 'usecase',
+  activity: 'activity', '活动图': 'activity',
+  er: 'er', erdiagram: 'er', '实体关系图': 'er', 'er图': 'er',
+  sequence: 'sequence', '时序图': 'sequence', '序列图': 'sequence',
+  state: 'state', '状态图': 'state', statechart: 'state',
+  component: 'component', '组件图': 'component',
+  deployment: 'deployment', '部署图': 'deployment',
+  object: 'object', '对象图': 'object',
+  package: 'package', '包图': 'package'
+};
+
+const ARROWS = ['--|>', '<|--', '..|>', '<|..', '-->', '<--', '..>', '<..',
+                '--*', '*--', '--o', 'o--', '->', '<-', '--', '..'];
+
+const ARROW_SPEC = {
+  '-->':  { kind: 'association',    dash: false, head: 'open' },
+  '--|>': { kind: 'generalization', dash: false, head: 'triangle' },
+  '..|>': { kind: 'realization',    dash: true,  head: 'triangle' },
+  '..>':  { kind: 'dependency',     dash: true,  head: 'open' },
+  '*--':  { kind: 'composition',    dash: false, head: 'none', tailDiamond: 'filled' },
+  'o--':  { kind: 'aggregation',    dash: false, head: 'none', tailDiamond: 'open' },
+  '--':   { kind: 'association',    dash: false, head: 'none' },
+  '..':   { kind: 'dependency',     dash: true,  head: 'none' },
+  '->':   { kind: 'association',    dash: false, head: 'open' }
+};
+const ARROW_NORMALIZE = {
+  '<--': '-->', '<|--': '--|>', '<|..': '..|>', '<..': '..>', '<-': '->',
+  '--*': '*--', '--o': 'o--'
+};
+
+function findArrow(s) {
+  let best = null;
+  for (const a of ARROWS) {
+    let idx = s.indexOf(a);
+    while (idx !== -1) {
+      if (!best || idx < best.idx || (idx === best.idx && a.length > best.arrow.length)) {
+        best = { idx, arrow: a };
+      }
+      idx = s.indexOf(a, idx + 1);
+    }
+  }
+  return best;
+}
+
+function readToken(s) {
+  s = String(s).trim();
+  if (!s) return ['', ''];
+  if (s[0] === '"') {
+    const end = s.indexOf('"', 1);
+    if (end < 0) return [s.slice(1), ''];
+    return [s.slice(1, end), s.slice(end + 1).trim()];
+  }
+  const m = s.match(/^([^\s{}(),:]+)/);
+  if (!m) return ['', s];
+  return [m[1], s.slice(m[1].length).trim()];
+}
+
+function parseEdgeLine(text) {
+  const f = findArrow(text);
+  if (!f) return null;
+  let arrow = f.arrow;
+  let left = text.slice(0, f.idx).trim();
+  let right = text.slice(f.idx + arrow.length).trim();
+  let lm = '', rm = '', m;
+
+  if ((m = left.match(/"([^"]*)"\s*$/))) { lm = m[1]; left = left.slice(0, m.index).trim(); }
+  if ((m = right.match(/^"([^"]*)"\s*(.*)$/))) { rm = m[1]; right = m[2].trim(); }
+
+  let label = '';
+  const ci = right.indexOf(':');
+  if (ci !== -1) { label = right.slice(ci + 1).trim(); right = right.slice(0, ci).trim(); }
+
+  if (ARROW_NORMALIZE[arrow]) {
+    arrow = ARROW_NORMALIZE[arrow];
+    [left, right] = [right, left];
+    [lm, rm] = [rm, lm];
+  }
+  left = left.replace(/\s+/g, ' ').trim();
+  right = right.replace(/\s+/g, ' ').trim();
+  if (!left || !right) return null;
+
+  return { from: left, to: right, arrow, lm, rm, label, spec: ARROW_SPEC[arrow] || ARROW_SPEC['--'] };
+}
+
+/* -------- 类图 / ER / 状态 / 组件 / 部署 / 对象 / 包 / 用例 -------- */
+
+const DECL_RE = /^(abstract\s+class|class|interface|enum|struct|annotation|trait|entity|component|node|artifact|object|package|state|actor|usecase|database|table|boundary)\b(.*)$/i;
+
+function parseClassLike(lines, type) {
+  const nodes = new Map();
+  const edges = [];
+  let pseudoCount = 0;
+  let boundary = null;
+
+  const resolveRef = (name) => {
+    if (name === '[*]') {
+      const id = `__pseudo_${++pseudoCount}`;
+      if (!nodes.has(id)) nodes.set(id, { id, label: '[*]', kind: 'pseudo', members: [] });
+      return id;
+    }
+    return name;
+  };
+  const ensure = (name, kind = 'class') => {
+    if (!nodes.has(name)) nodes.set(name, { id: name, label: name, kind, members: [] });
+    return nodes.get(name);
+  };
+
+  let i = 0;
+  while (i < lines.length) {
+    const { text, no } = lines[i];
+    if (text === '}') { i++; continue; }
+
+    // boundary 关键字（用例图系统边界）
+    const bm = text.match(/^boundary\s+"([^"]+)"\s*$/i);
+    if (bm) {
+      boundary = { label: bm[1] };
+      i++;
+      continue;
+    }
+
+    const dm = text.match(DECL_RE);
+    if (dm) {
+      let kw = dm[1].replace(/\s+/g, '').toLowerCase();
+      let rest = dm[2].trim();
+      let block = false;
+      if (rest.endsWith('{')) { block = true; rest = rest.slice(0, -1).trim(); }
+
+      // 检查 :boundary 后缀（用例图系统边界标记）
+      const bmSuffix = rest.match(/:\s*boundary\s*$/i);
+      const insideBoundary = !!bmSuffix;
+      if (bmSuffix) rest = rest.slice(0, bmSuffix.index).trim();
+
+      const [name] = readToken(rest);
+      if (!name) throw new Error(`第 ${no} 行：${dm[1]} 缺少名称`);
+
+      const kind = kw === 'abstractclass' ? 'abstract' : kw;
+      const node = ensure(name, kind);
+      node.kind = kind;
+      node.insideBoundary = insideBoundary;
+
+      if (block) {
+        i++;
+        while (i < lines.length && lines[i].text !== '}') {
+          node.members.push(lines[i].text);
+          i++;
+        }
+        if (i >= lines.length) throw new Error(`第 ${no} 行：缺少匹配的 "}"`);
+      }
+      i++;
+      continue;
+    }
+
+    const e = parseEdgeLine(text);
+    if (e) {
+      const fromId = resolveRef(e.from);
+      const toId = resolveRef(e.to);
+      ensure(fromId); ensure(toId);
+      edges.push({
+        from: fromId, to: toId, label: e.label,
+        fromMult: e.lm, toMult: e.rm,
+        kind: e.spec.kind, dash: e.spec.dash,
+        head: e.spec.head, tailDiamond: e.spec.tailDiamond || null
+      });
+      i++;
+      continue;
+    }
+
+    const [nm] = readToken(text);
+    if (nm && /^[\w\u4e00-\u9fff.\-*[\]$]+$/.test(nm)) ensure(nm);
+    i++;
+  }
+
+  return { nodes: [...nodes.values()], edges, boundary };
+}
+
+/* ---------------- 活动图 ---------------- */
+
+function parseActivity(lines) {
+  const nodes = [];
+  const edges = [];
+  let counter = 0;
+  const nid = (p) => `${p}_${++counter}`;
+  let prev = [];
+  let pendingLabel = null;
+  const stack = [];
+
+  const link = (froms, to, label) => {
+    for (const f of froms) {
+      if (f === to) continue;
+      edges.push({ from: f, to, label: label || '' });
+    }
+  };
+
+  for (const { text, no } of lines) {
+    let m;
+    const lbl = pendingLabel; pendingLabel = null;
+
+    if (text === 'start') {
+      const id = nid('start');
+      nodes.push({ id, kind: 'start', label: '' });
+      link(prev, id, lbl); prev = [id];
+
+    } else if (text === 'stop' || text === 'end' || text === 'end.') {
+      const id = nid('stop');
+      nodes.push({ id, kind: 'stop', label: '' });
+      link(prev, id, lbl); prev = [id];
+
+    } else if ((m = text.match(/^:(.*?);?\s*$/))) {
+      const id = nid('act');
+      nodes.push({ id, kind: 'action', label: m[1].trim() });
+      link(prev, id, lbl); prev = [id];
+
+    } else if ((m = text.match(/^if\s*[（(]?(.*?)[)）]?\s*$/))) {
+      const id = nid('dec');
+      nodes.push({ id, kind: 'decision', label: m[1].trim() });
+      link(prev, id, lbl);
+      stack.push({ type: 'if', dec: id, thenEnds: null });
+      prev = [id]; pendingLabel = '是';
+
+    } else if (text === 'else' || /^else\b/.test(text)) {
+      const top = stack[stack.length - 1];
+      if (!top || top.type !== 'if') throw new Error(`第 ${no} 行：else 没有匹配的 if`);
+      top.thenEnds = prev;
+      prev = [top.dec]; pendingLabel = '否';
+
+    } else if (text === 'endif') {
+      const top = stack.pop();
+      if (!top || top.type !== 'if') throw new Error(`第 ${no} 行：endif 没有匹配的 if`);
+      const elseEnds = prev;
+      prev = top.thenEnds === null
+        ? [...new Set([...elseEnds, top.dec])]
+        : [...new Set([...top.thenEnds, ...elseEnds])];
+
+    } else if ((m = text.match(/^while\s*[（(]?(.*?)[)）]?\s*$/))) {
+      const id = nid('dec');
+      nodes.push({ id, kind: 'decision', label: m[1].trim(), isLoop: true });
+      link(prev, id, lbl);
+      stack.push({ type: 'while', dec: id });
+      prev = [id]; pendingLabel = '是';
+
+    } else if (text === 'endwhile') {
+      const top = stack.pop();
+      if (!top || top.type !== 'while') throw new Error(`第 ${no} 行：endwhile 没有匹配的 while`);
+      link(prev, top.dec);
+      prev = [top.dec]; pendingLabel = '否';
+
+    } else if ((m = text.match(/^note\s*[:：]?\s*(.*)$/))) {
+      const id = nid('note');
+      nodes.push({ id, kind: 'note', label: m[1].trim() });
+      link(prev, id, lbl); prev = [id];
+
+    } else {
+      const id = nid('act');
+      nodes.push({ id, kind: 'action', label: text });
+      link(prev, id, lbl); prev = [id];
+    }
+  }
+
+  if (!nodes.length) throw new Error('活动图为空');
+  return { nodes, edges };
+}
+
+/* ---------------- 时序图 ---------------- */
+
+function parseSequence(lines) {
+  const actors = [];
+  const actorMap = new Map();
+  const messages = [];
+
+  const ensureActor = (name) => {
+    if (!actorMap.has(name)) {
+      const a = { id: name, label: name };
+      actorMap.set(name, a);
+      actors.push(a);
+    }
+    return actorMap.get(name);
+  };
+
+  for (const { text } of lines) {
+    let m;
+    if ((m = text.match(/^(?:participant|actor)\s+(.+)$/i))) {
+      let rest = m[1].trim();
+      const am = rest.match(/^(.+?)\s+as\s+(\S+)$/i);
+      if (am) {
+        const a = ensureActor(am[2]);
+        a.label = am[1].trim();
+      } else {
+        const [nm] = readToken(rest);
+        if (nm) ensureActor(nm);
+      }
+      continue;
+    }
+
+    const ci = text.indexOf(':');
+    if (ci === -1) continue;
+    const leftPart = text.slice(0, ci).trim();
+    const label = text.slice(ci + 1).trim();
+    const am = leftPart.match(/^(.+?)\s*(-{1,2}>)\s*(.+)$/);
+    if (!am) continue;
+    const from = am[1].trim();
+    const dashed = am[2] === '-->';
+    const to = am[3].trim();
+    ensureActor(from); ensureActor(to);
+    messages.push({ from, to, label, dashed });
+  }
+
+  return { nodes: [], edges: [], actors, messages };
+}
+
+/* ---------------- 顶层解析 ---------------- */
+
+function parseDSL(src) {
+  const raw = String(src).split(/\r?\n/);
+  const lines = [];
+  raw.forEach((l, idx) => {
+    const t = l.trim();
+    if (!t || t.startsWith('//') || t.startsWith('#')) return;
+    lines.push({ text: t, no: idx + 1 });
+  });
+  if (!lines.length) throw new Error('文档为空，请先写入 @diagram ...');
+
+  const hm = lines[0].text.match(/^@diagram\s+([^\s{]+)\s*(?:"([^"]*)")?\s*$/);
+  if (!hm) throw new Error(`第 ${lines[0].no} 行：缺少图类型声明，格式应为 @diagram <类型> "标题"`);
+
+  const key = hm[1].toLowerCase();
+  const type = DIAGRAM_ALIASES[key] || DIAGRAM_ALIASES[hm[1]];
+  if (!type) throw new Error(`第 ${lines[0].no} 行：未知的图类型 "${hm[1]}"`);
+
+  const title = hm[2] || '';
+  const body = lines.slice(1);
+
+  let model;
+  if (type === 'activity') model = parseActivity(body);
+  else if (type === 'sequence') model = parseSequence(body);
+  else model = parseClassLike(body, type);
+
+  model.type = type;
+  model.title = title;
+  return model;
+}
+
+/* ==========================================================================
+ *  布局层
+ * ========================================================================== */
+
+function prepareNodes(model) {
+  const { type, nodes } = model;
+  for (const n of nodes) {
+    if (type === 'usecase') {
+      if (n.kind === 'actor') {
+        n.shape = 'actor'; n.w = 46; n.h = 76;
+      } else {
+        n.shape = 'ellipse';
+        n.w = Math.max(textWidth(n.label, 13) + 56, 108);
+        n.h = 50;
+      }
+      continue;
+    }
+
+    if (type === 'activity') {
+      if (n.kind === 'start' || n.kind === 'stop') { n.shape = 'circle'; n.w = 26; n.h = 26; }
+      else if (n.kind === 'decision') {
+        n.shape = 'diamond';
+        n.w = Math.max(80, textWidth(n.label, 12) * 1.55);
+        n.h = Math.max(52, n.w * 0.62);
+      } else {
+        n.shape = 'roundrect';
+        n.w = Math.max(textWidth(n.label, 13) + 40, 96);
+        n.h = 46;
+      }
+      continue;
+    }
+
+    if (type === 'state') {
+      if (n.kind === 'pseudo' || n.label === '[*]') {
+        n.shape = 'circle'; n.w = 24; n.h = 24; n.label = '[*]';
+      } else {
+        n.shape = 'roundrect';
+        n.w = Math.max(textWidth(n.label, 13) + 44, 92);
+        n.h = 46;
+      }
+      continue;
+    }
+
+    if (type === 'er') {
+      const mems = n.members || [];
+      let w = textWidth(n.label, 14, '600') + 36;
+      for (const m of mems) w = Math.max(w, textWidth(m, 12.5) + 28);
+      n.shape = 'rect';
+      n.w = Math.max(w, 140);
+      n.h = 34 + Math.max(mems.length, 1) * 20 + 8;
+      continue;
+    }
+
+    const mems = n.members || [];
+    let w = textWidth(n.label, 14, '600') + 40;
+    for (const m of mems) w = Math.max(w, textWidth(m, 12.5) + 30);
+    n.shape = 'rect';
+    n.w = Math.max(w, 124);
+    n.h = mems.length ? 34 + mems.length * 18 + 8 : 44;
+  }
+}
+
+/* -------- 力导向布局 -------- */
+
+function layoutForce(model) {
+  const nodes = model.nodes;
+  const n = nodes.length;
+  if (!n) return;
+  const W = Math.max(760, Math.sqrt(n) * 260);
+  const H = Math.max(520, Math.sqrt(n) * 200);
+
+  nodes.forEach((nd, i) => {
+    const ang = (i / n) * Math.PI * 2;
+    const r = Math.min(W, H) * 0.30;
+    nd.x = W / 2 + Math.cos(ang) * r * (0.65 + Math.random() * 0.35);
+    nd.y = H / 2 + Math.sin(ang) * r * (0.65 + Math.random() * 0.35);
+  });
+
+  const idOf = new Map(nodes.map((nd, i) => [nd.id, i]));
+  const links = model.edges
+    .map(e => ({ a: idOf.get(e.from), b: idOf.get(e.to) }))
+    .filter(l => l.a !== undefined && l.b !== undefined && l.a !== l.b);
+
+  const k = Math.sqrt((W * H) / Math.max(n, 1)) * 0.95;
+  let temp = W / 7;
+  const ITER = 320;
+
+  for (let it = 0; it < ITER; it++) {
+    for (const nd of nodes) { nd._fx = 0; nd._fy = 0; }
+
+    for (let i = 0; i < n; i++) {
+      const a = nodes[i];
+      for (let j = i + 1; j < n; j++) {
+        const b = nodes[j];
+        let dx = a.x - b.x, dy = a.y - b.y;
+        let d2 = dx * dx + dy * dy;
+        if (d2 < 0.01) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 1; }
+        const d = Math.sqrt(d2);
+
+        const minX = (a.w + b.w) / 2 + 30;
+        const minY = (a.h + b.h) / 2 + 26;
+        const ox = minX - Math.abs(dx);
+        const oy = minY - Math.abs(dy);
+        if (ox > 0 && oy > 0) {
+          if (ox < oy) {
+            const s = (Math.sign(dx) || 1) * ox * 0.45;
+            a._fx += s; b._fx -= s;
+          } else {
+            const s = (Math.sign(dy) || 1) * oy * 0.45;
+            a._fy += s; b._fy -= s;
+          }
+        }
+
+        const f = (k * k) / d * 0.30;
+        const ux = dx / d, uy = dy / d;
+        a._fx += ux * f; a._fy += uy * f;
+        b._fx -= ux * f; b._fy -= uy * f;
+      }
+    }
+
+    for (const l of links) {
+      const a = nodes[l.a], b = nodes[l.b];
+      let dx = b.x - a.x, dy = b.y - a.y;
+      const d = Math.hypot(dx, dy) || 0.01;
+      const target = k * 1.15;
+      const f = (d - target) * 0.045;
+      const ux = dx / d, uy = dy / d;
+      a._fx += ux * f; a._fy += uy * f;
+      b._fx -= ux * f; b._fy -= uy * f;
+    }
+
+    for (const nd of nodes) {
+      const disp = Math.hypot(nd._fx, nd._fy) || 0.0001;
+      const lim = Math.min(disp, temp);
+      nd.x += (nd._fx / disp) * lim;
+      nd.y += (nd._fy / disp) * lim;
+      nd.x = clamp(nd.x, nd.w / 2 + 30, W - nd.w / 2 - 30);
+      nd.y = clamp(nd.y, nd.h / 2 + 30, H - nd.h / 2 - 30);
+    }
+    temp *= 0.992;
+  }
+
+  resolveOverlaps(nodes);
+}
+
+function resolveOverlaps(nodes, gapX = 30, gapY = 26) {
+  for (let pass = 0; pass < 120; pass++) {
+    let moved = false;
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i], b = nodes[j];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const ox = (a.w + b.w) / 2 + gapX - Math.abs(dx);
+        const oy = (a.h + b.h) / 2 + gapY - Math.abs(dy);
+        if (ox > 0 && oy > 0) {
+          moved = true;
+          if (ox < oy) {
+            const s = (Math.sign(dx) || 1) * ox / 2;
+            a.x -= s; b.x += s;
+          } else {
+            const s = (Math.sign(dy) || 1) * oy / 2;
+            a.y -= s; b.y += s;
+          }
+        }
+      }
+    }
+    if (!moved) break;
+  }
+}
+
+/* -------- 活动图分层布局 -------- */
+
+function layoutActivity(model) {
+  const { nodes, edges } = model;
+  const adj = new Map(nodes.map(n => [n.id, []]));
+  const indeg = new Map(nodes.map(n => [n.id, 0]));
+  for (const e of edges) {
+    if (adj.has(e.from) && indeg.has(e.to)) {
+      adj.get(e.from).push(e.to);
+      indeg.set(e.to, indeg.get(e.to) + 1);
+    }
+  }
+
+  const depth = new Map();
+  const roots = nodes.filter(n => indeg.get(n.id) === 0).map(n => n.id);
+  const q = [...roots];
+  roots.forEach(r => depth.set(r, 0));
+  while (q.length) {
+    const cur = q.shift();
+    const d = depth.get(cur);
+    for (const nx of adj.get(cur) || []) {
+      if (!depth.has(nx)) { depth.set(nx, d + 1); q.push(nx); }
+    }
+  }
+
+  let maxD = 0;
+  for (const v of depth.values()) maxD = Math.max(maxD, v);
+  for (const n of nodes) if (!depth.has(n.id)) depth.set(n.id, ++maxD);
+
+  const layers = [];
+  for (const n of nodes) {
+    const d = depth.get(n.id);
+    if (!layers[d]) layers[d] = [];
+    layers[d].push(n);
+  }
+
+  const VGAP = 54, HGAP = 46;
+  let y = 40;
+  for (let d = 0; d < layers.length; d++) {
+    const layer = layers[d] || [];
+    if (!layer.length) continue;
+    let maxH = 0;
+    for (const n of layer) maxH = Math.max(maxH, n.h);
+    const cy = y + maxH / 2;
+    const totalW = layer.reduce((s, n) => s + n.w, 0) + Math.max(0, layer.length - 1) * HGAP;
+    let cx = -totalW / 2;
+    for (const n of layer) {
+      n.x = cx + n.w / 2;
+      n.y = cy;
+      cx += n.w + HGAP;
+    }
+    y += maxH + VGAP;
+  }
+}
+
+/* -------- 时序图布局 -------- */
+
+function layoutSequence(model) {
+  const PAD = 44, GAP = 56;
+  const TOP = 24;
+  const titleH = model.title ? 48 : 0;
+  const BOX_H = 44;
+  const startY = TOP + titleH;
+
+  let x = PAD;
+  for (const a of model.actors) {
+    a.w = Math.max(textWidth(a.label, 13, '600') + 40, 96);
+    a.h = BOX_H;
+    a.x = x + a.w / 2;
+    a.y = startY + BOX_H / 2;
+    x += a.w + GAP;
+  }
+  const width = Math.max(x - GAP + PAD, 360);
+
+  let y = startY + BOX_H + 44;
+  for (const m of model.messages) {
+    m.y = y;
+    y += 44;
+  }
+  const height = y + 36;
+
+  model.titleY = TOP + 26;
+  return { width, height };
+}
+
+/* -------- 归一化到原点 -------- */
+
+function normalizeToOrigin(model) {
+  const { nodes, type } = model;
+  if (!nodes.length) {
+    model.contentW = 420;
+    model.contentH = 300;
+    model.titleX = 210;
+    model.titleY = 40;
+    if (model.boundary) {
+      model.boundary.x = 16; model.boundary.y = 16;
+      model.boundary.w = 388; model.boundary.h = 248;
+    }
+    return;
+  }
+
+  // 用例图含系统边界：框内 / 框外分离布局
+  if (type === 'usecase' && model.boundary) {
+    return normalizeUsecaseBoundary(model);
+  }
+
+  // 默认布局（所有节点统一偏移）
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of nodes) {
+    const nx = n.x - n.w / 2, ny = n.y - n.h / 2;
+    let mx = n.x + n.w / 2, my = n.y + n.h / 2;
+    if (type === 'usecase' && n.kind === 'actor') my += 26;
+    minX = Math.min(minX, nx); minY = Math.min(minY, ny);
+    maxX = Math.max(maxX, mx); maxY = Math.max(maxY, my);
+  }
+  const PAD = 36;
+  const TOP_PAD = model.title ? 70 : 36;
+  const dx = PAD - minX, dy = TOP_PAD - minY;
+  for (const n of nodes) { n.x += dx; n.y += dy; }
+
+  model.contentW = (maxX - minX) + PAD * 2;
+  model.contentH = (maxY - minY) + TOP_PAD + PAD;
+  model.titleX = model.contentW / 2;
+  model.titleY = 42;
+  return;
+}
+
+/* -------- 用例图系统边界专用布局 -------- */
+
+function normalizeUsecaseBoundary(model) {
+  const { nodes, title } = model;
+  const boundNodes = nodes.filter(n => n.insideBoundary);
+  const outsideNodes = nodes.filter(n => !n.insideBoundary);
+
+  const BPAD = 48;           // 边界框内部留白
+  const PAD = 36 + BPAD;     // 内容区边距
+  const TOP_PAD = (title ? 70 : 36) + 44;
+
+  // ── 1. 计算框内元素的包围盒并偏移 ──
+  if (boundNodes.length) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of boundNodes) {
+      const nx = n.x - n.w / 2, ny = n.y - n.h / 2;
+      let mx = n.x + n.w / 2, my = n.y + n.h / 2;
+      if (n.kind === 'actor') my += 26;
+      minX = Math.min(minX, nx); minY = Math.min(minY, ny);
+      maxX = Math.max(maxX, mx); maxY = Math.max(maxY, my);
+    }
+    const dx = PAD - minX, dy = TOP_PAD - minY;
+    for (const n of boundNodes) { n.x += dx; n.y += dy; }
+
+    model.contentW = (maxX - minX) + PAD * 2;
+    model.contentH = (maxY - minY) + TOP_PAD + PAD;
+
+    model.boundary.x = PAD - BPAD;
+    model.boundary.y = TOP_PAD - 44;
+    model.boundary.w = model.contentW - (PAD - BPAD) * 2;
+    model.boundary.h = model.contentH - (TOP_PAD - 36) - (PAD - BPAD);
+  } else {
+    model.contentW = 420;
+    model.contentH = 300;
+    model.boundary.x = 16;  model.boundary.y = 16;
+    model.boundary.w = 388; model.boundary.h = 248;
+  }
+
+  // ── 2. 框外元素排列在边界框左侧 ──
+  const outerLeft = model.boundary.x - 70;  // 边界左侧 70px
+  let cy = TOP_PAD + 20;
+  for (const n of outsideNodes) {
+    n.x = outerLeft;
+    n.y = cy;
+    cy += Math.max(n.h, title ? 100 : 80) + 24;
+  }
+
+  // ── 3. 计算全部元素的整体包围盒，确保无负坐标 ──
+  let gMinX = Infinity, gMinY = Infinity, gMaxX = -Infinity, gMaxY = -Infinity;
+  for (const n of nodes) {
+    const nx = n.x - n.w / 2, ny = n.y - n.h / 2;
+    const mx = n.x + n.w / 2, my = n.y + n.h / 2 + (n.kind === 'actor' ? 26 : 0);
+    gMinX = Math.min(gMinX, nx); gMinY = Math.min(gMinY, ny);
+    gMaxX = Math.max(gMaxX, mx); gMaxY = Math.max(gMaxY, my);
+  }
+
+  // 如果框外元素超出左边界，整体右移
+  if (gMinX < PAD) {
+    const shiftX = PAD - gMinX;
+    for (const n of nodes) n.x += shiftX;
+    model.boundary.x += shiftX;
+    gMaxX += shiftX; gMinX = PAD;
+  }
+  // 同理处理上边界
+  if (gMinY < TOP_PAD - 44) {
+    const shiftY = (TOP_PAD - 44) - gMinY;
+    for (const n of nodes) n.y += shiftY;
+    model.boundary.y += shiftY;
+    gMaxY += shiftY; gMinY = TOP_PAD - 44;
+  }
+
+  model.contentW = Math.max(gMaxX + PAD, model.contentW);
+  model.contentH = Math.max(gMaxY + PAD, model.contentH);
+  model.titleX = model.contentW / 2;
+  model.titleY = 42;
+}
+
+/* ==========================================================================
+ *  渲染层
+ * ========================================================================== */
+
+const SVG_CSS = `
+.node-box{fill:#ffffff;stroke:#94a3b8;stroke-width:1.5;}
+.node-box-soft{fill:#ffffff;stroke:#a5b4fc;stroke-width:1.5;}
+.node-header{fill:#e0e7ff;stroke:#94a3b8;stroke-width:1.5;}
+.node-header-soft{fill:#ede9fe;stroke:#a78bfa;stroke-width:1.5;}
+.node-title{font-family:${FONT};font-size:14px;font-weight:600;fill:#1e293b;}
+.node-title-sm{font-family:${FONT};font-size:12.5px;font-weight:600;fill:#1e293b;}
+.node-member{font-family:${FONT};font-size:12.5px;fill:#475569;}
+.node-actor-label{font-family:${FONT};font-size:13px;font-weight:600;fill:#1e293b;}
+.usecase-ellipse{fill:#f5f3ff;stroke:#8b5cf6;stroke-width:1.5;}
+.actor-line{stroke:#334155;stroke-width:1.8;fill:none;}
+.actor-head{fill:#ffffff;stroke:#334155;stroke-width:1.8;}
+.act-round{fill:#ecfeff;stroke:#0891b2;stroke-width:1.6;rx:22;}
+.act-diamond{fill:#fef3c7;stroke:#d97706;stroke-width:1.6;}
+.act-start{fill:#0f172a;stroke:#0f172a;stroke-width:1.6;}
+.act-stop{fill:#ffffff;stroke:#0f172a;stroke-width:2.4;}
+.act-text{font-family:${FONT};font-size:13px;fill:#0f172a;}
+.act-text-sm{font-family:${FONT};font-size:11.5px;fill:#78350f;}
+.state-round{fill:#f0fdf4;stroke:#16a34a;stroke-width:1.6;}
+.state-pseudo{fill:#0f172a;stroke:#0f172a;}
+.edge-line{stroke:#64748b;stroke-width:1.5;fill:none;stroke-linecap:round;}
+.edge-dashed{stroke-dasharray:7 5;}
+.edge-label{font-family:${FONT};font-size:12px;fill:#475569;}
+.edge-label-bg{fill:#ffffff;opacity:.92;}
+.arrow-fill{fill:#64748b;}
+.arrow-line{stroke:#64748b;stroke-width:1.5;fill:none;stroke-linecap:round;}
+.diamond-fill{fill:#64748b;stroke:#64748b;stroke-width:1;}
+.diamond-open{fill:#ffffff;stroke:#64748b;stroke-width:1.6;}
+.title-text{font-family:${FONT};font-size:19px;font-weight:700;fill:#1e293b;}
+.mult-text{font-family:${FONT};font-size:11.5px;fill:#334155;}
+.seq-box{fill:#eef2ff;stroke:#6366f1;stroke-width:1.6;}
+.seq-life{stroke:#c7d2fe;stroke-width:1.5;stroke-dasharray:5 5;}
+.seq-msg{stroke:#334155;stroke-width:1.6;fill:none;}
+.seq-msg-dashed{stroke-dasharray:7 5;}
+.seq-msg-text{font-family:${FONT};font-size:12.5px;fill:#1e293b;}
+.seq-actor-text{font-family:${FONT};font-size:13px;font-weight:600;fill:#312e81;}
+.hit{fill:transparent;pointer-events:all;}
+`;
+
+function clipPoint(n, tx, ty) {
+  const cx = n.x, cy = n.y;
+  const dx = tx - cx, dy = ty - cy;
+  if (dx === 0 && dy === 0) return { x: cx, y: cy };
+
+  if (n.shape === 'ellipse' || n.shape === 'circle') {
+    const rx = n.w / 2, ry = n.h / 2;
+    const t = 1 / Math.sqrt((dx * dx) / (rx * rx) + (dy * dy) / (ry * ry));
+    return { x: cx + dx * t, y: cy + dy * t };
+  }
+  if (n.shape === 'diamond') {
+    const hw = n.w / 2, hh = n.h / 2;
+    const t = 1 / (Math.abs(dx) / hw + Math.abs(dy) / hh);
+    return { x: cx + dx * t, y: cy + dy * t };
+  }
+  const hw = n.w / 2, hh = n.h / 2;
+  const sx = dx !== 0 ? hw / Math.abs(dx) : Infinity;
+  const sy = dy !== 0 ? hh / Math.abs(dy) : Infinity;
+  const t = Math.min(sx, sy);
+  return { x: cx + dx * t, y: cy + dy * t };
+}
+
+function addArrowHead(g, tip, angle, kind) {
+  const size = 11;
+  if (kind === 'triangle') {
+    const p1 = { x: tip.x - size * Math.cos(angle - 0.36), y: tip.y - size * Math.sin(angle - 0.36) };
+    const p2 = { x: tip.x - size * Math.cos(angle + 0.36), y: tip.y - size * Math.sin(angle + 0.36) };
+    g.appendChild(el('polygon', {
+      points: `${tip.x},${tip.y} ${p1.x},${p1.y} ${p2.x},${p2.y}`,
+      class: 'arrow-fill'
+    }));
+  } else if (kind === 'open') {
+    const p1 = { x: tip.x - size * Math.cos(angle - 0.42), y: tip.y - size * Math.sin(angle - 0.42) };
+    const p2 = { x: tip.x - size * Math.cos(angle + 0.42), y: tip.y - size * Math.sin(angle + 0.42) };
+    g.appendChild(el('polyline', {
+      points: `${p1.x},${p1.y} ${tip.x},${tip.y} ${p2.x},${p2.y}`,
+      class: 'arrow-line'
+    }));
+  }
+}
+
+function addDiamond(g, tip, angle, filled) {
+  const len = 14, wid = 6;
+  const p1 = { x: tip.x + len * Math.cos(angle), y: tip.y + len * Math.sin(angle) };
+  const mx = (tip.x + p1.x) / 2, my = (tip.y + p1.y) / 2;
+  const n1 = { x: mx - wid * Math.sin(angle), y: my + wid * Math.cos(angle) };
+  const n2 = { x: mx + wid * Math.sin(angle), y: my - wid * Math.cos(angle) };
+  g.appendChild(el('polygon', {
+    points: `${tip.x},${tip.y} ${n1.x},${n1.y} ${p1.x},${p1.y} ${n2.x},${n2.y}`,
+    class: filled ? 'diamond-fill' : 'diamond-open'
+  }));
+}
+
+function drawEdgeLabel(g, x, y, text) {
+  if (!text) return;
+  const w = textWidth(text, 12) + 10;
+  g.appendChild(el('rect', { x: x - w / 2, y: y - 10, width: w, height: 16, rx: 4, class: 'edge-label-bg' }));
+  g.appendChild(el('text', { x, y: y + 1, 'text-anchor': 'middle', class: 'edge-label' }, text));
+}
+
+function drawEdge(g, e, nodeMap) {
+  const a = nodeMap.get(e.from);
+  const b = nodeMap.get(e.to);
+  if (!a || !b) return;
+
+  if (a === b) {
+    const r = 26;
+    const sx = a.x + a.w / 2;
+    const sy = a.y - 6;
+    const path = `M ${sx} ${sy} C ${sx + 58} ${sy - 42}, ${sx + 58} ${sy + 42}, ${sx} ${sy + 18}`;
+    g.appendChild(el('path', { d: path, class: 'edge-line' + (e.dash ? ' edge-dashed' : '') }));
+    if (e.label) drawEdgeLabel(g, sx + 62, sy + 6, e.label);
+    return;
+  }
+
+  const p1 = clipPoint(a, b.x, b.y);
+  const p2 = clipPoint(b, a.x, a.y);
+  const ang = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+
+  g.appendChild(el('line', {
+    x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y,
+    class: 'edge-line' + (e.dash ? ' edge-dashed' : '')
+  }));
+
+  if (e.head && e.head !== 'none') addArrowHead(g, p2, ang, e.head);
+  if (e.tailDiamond) addDiamond(g, p1, ang, e.tailDiamond === 'filled');
+
+  const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+  if (e.label) drawEdgeLabel(g, mx, my - 8, e.label);
+
+  if (e.fromMult) {
+    const t = 0.18;
+    const x = p1.x + (p2.x - p1.x) * t, y = p1.y + (p2.y - p1.y) * t;
+    g.appendChild(el('text', { x: x + 6, y: y - 6, class: 'mult-text' }, e.fromMult));
+  }
+  if (e.toMult) {
+    const t = 0.82;
+    const x = p1.x + (p2.x - p1.x) * t, y = p1.y + (p2.y - p1.y) * t;
+    g.appendChild(el('text', { x: x - 6, y: y - 6, class: 'mult-text', 'text-anchor': 'end' }, e.toMult));
+  }
+}
+
+/* ---------------- 节点绘制 ---------------- */
+
+function drawNode(g, n, type) {
+  const x = n.x - n.w / 2, y = n.y - n.h / 2;
+
+  if (type === 'activity') {
+    if (n.kind === 'start') {
+      g.appendChild(el('circle', { cx: n.x, cy: n.y, r: 12, class: 'act-start' }));
+      return;
+    }
+    if (n.kind === 'stop') {
+      g.appendChild(el('circle', { cx: n.x, cy: n.y, r: 13, class: 'act-stop' }));
+      g.appendChild(el('circle', { cx: n.x, cy: n.y, r: 7, class: 'act-start' }));
+      return;
+    }
+    if (n.kind === 'decision') {
+      g.appendChild(el('polygon', {
+        points: `${n.x},${y} ${x + n.w},${n.y} ${n.x},${y + n.h} ${x},${n.y}`,
+        class: 'act-diamond'
+      }));
+      g.appendChild(el('text', {
+        x: n.x, y: n.y + 4, 'text-anchor': 'middle', class: 'act-text-sm'
+      }, n.label));
+      return;
+    }
+    g.appendChild(el('rect', { x, y, width: n.w, height: n.h, rx: 22, class: 'act-round' }));
+    g.appendChild(el('text', {
+      x: n.x, y: n.y + 5, 'text-anchor': 'middle', class: 'act-text'
+    }, n.label));
+    return;
+  }
+
+  if (type === 'usecase') {
+    if (n.kind === 'actor') {
+      const cx = n.x, top = y + 4, headR = 11;
+      g.appendChild(el('circle', { cx, cy: top + headR, r: headR, class: 'actor-head' }));
+      const bodyTop = top + headR * 2 + 2;
+      const bodyBottom = bodyTop + 30;
+      g.appendChild(el('line', { x1: cx, y1: bodyTop, x2: cx, y2: bodyBottom, class: 'actor-line' }));
+      g.appendChild(el('line', { x1: cx - 17, y1: bodyTop + 12, x2: cx + 17, y2: bodyTop + 12, class: 'actor-line' }));
+      g.appendChild(el('line', { x1: cx, y1: bodyBottom, x2: cx - 15, y2: bodyBottom + 24, class: 'actor-line' }));
+      g.appendChild(el('line', { x1: cx, y1: bodyBottom, x2: cx + 15, y2: bodyBottom + 24, class: 'actor-line' }));
+      g.appendChild(el('text', {
+        x: cx, y: y + n.h + 18, 'text-anchor': 'middle', class: 'node-actor-label'
+      }, n.label));
+      return;
+    }
+    g.appendChild(el('ellipse', { cx: n.x, cy: n.y, rx: n.w / 2, ry: n.h / 2, class: 'usecase-ellipse' }));
+    g.appendChild(el('text', {
+      x: n.x, y: n.y + 5, 'text-anchor': 'middle', class: 'node-title-sm'
+    }, n.label));
+    return;
+  }
+
+  if (type === 'state') {
+    if (n.shape === 'circle') {
+      g.appendChild(el('circle', { cx: n.x, cy: n.y, r: 11, class: 'state-pseudo' }));
+      return;
+    }
+    g.appendChild(el('rect', { x, y, width: n.w, height: n.h, rx: 22, class: 'state-round' }));
+    g.appendChild(el('text', {
+      x: n.x, y: n.y + 5, 'text-anchor': 'middle', class: 'node-title-sm'
+    }, n.label));
+    return;
+  }
+
+  const isSoft = (type === 'component' || type === 'deployment' || type === 'package');
+  const headH = 34;
+
+  g.appendChild(el('rect', {
+    x, y, width: n.w, height: n.h, rx: 6,
+    class: isSoft ? 'node-box-soft' : 'node-box'
+  }));
+  g.appendChild(el('rect', {
+    x, y, width: n.w, height: headH,
+    class: isSoft ? 'node-header-soft' : 'node-header'
+  }));
+  g.appendChild(el('rect', {
+    x, y: y + headH - 7, width: n.w, height: 7,
+    class: isSoft ? 'node-header-soft' : 'node-header', stroke: 'none'
+  }));
+  g.appendChild(el('line', {
+    x1: x, y1: y + headH, x2: x + n.w, y2: y + headH,
+    stroke: isSoft ? '#a78bfa' : '#94a3b8', 'stroke-width': 1
+  }));
+
+  const kw = n.kind === 'abstract' ? '«abstract» ' : '';
+  g.appendChild(el('text', {
+    x: n.x, y: y + 22, 'text-anchor': 'middle', class: 'node-title'
+  }, kw + n.label));
+
+  (n.members || []).forEach((m, i) => {
+    g.appendChild(el('text', {
+      x: x + 12, y: y + headH + 20 + i * 18, class: 'node-member'
+    }, m));
+  });
+}
+
+/* ---------------- 内容构建 ---------------- */
+
+function buildGraphContent(model) {
+  const root = el('g');
+  const nodeMap = new Map(model.nodes.map(n => [n.id, n]));
+
+  // 绘制用例图系统边界框
+  if (model.type === 'usecase' && model.boundary) {
+    const b = model.boundary;
+    root.appendChild(el('rect', {
+      x: b.x, y: b.y, width: b.w, height: b.h, rx: 10,
+      fill: '#f4f6ff', stroke: '#6366f1', 'stroke-width': 1.5, 'stroke-dasharray': '8 4'
+    }));
+    const lblW = textWidth(b.label, 13, '600') + 20;
+    root.appendChild(el('rect', {
+      x: b.x + 14, y: b.y - 11, width: lblW, height: 22, rx: 4,
+      fill: '#f4f6ff', stroke: 'none'
+    }));
+    root.appendChild(el('text', {
+      x: b.x + 24, y: b.y + 4,
+      class: 'node-title-sm', fill: '#4338ca'
+    }, b.label));
+  }
+
+  const gEdges = el('g');
+  const gNodes = el('g');
+  root.appendChild(gEdges);
+  root.appendChild(gNodes);
+
+  for (const e of model.edges) drawEdge(gEdges, e, nodeMap);
+
+  for (const n of model.nodes) {
+    const gn = el('g', { 'data-node-id': n.id });
+    // 透明命中区域
+    const pad = 6;
+    const extraH = (model.type === 'usecase' && n.kind === 'actor') ? 26 : 0;
+    gn.appendChild(el('rect', {
+      x: n.x - n.w / 2 - pad,
+      y: n.y - n.h / 2 - pad,
+      width: n.w + pad * 2,
+      height: n.h + pad * 2 + extraH,
+      class: 'hit'
+    }));
+    drawNode(gn, n, model.type);
+    gNodes.appendChild(gn);
+  }
+
+  if (model.title) {
+    root.appendChild(el('text', {
+      x: model.titleX, y: model.titleY, 'text-anchor': 'middle', class: 'title-text'
+    }, model.title));
+  }
+
+  return root;
+}
+
+function buildSequenceContent(model) {
+  const g = el('g');
+  const { actors, messages, title } = model;
+  const W = model.contentW;
+  const H = model.contentH;
+
+  if (title) {
+    g.appendChild(el('text', {
+      x: W / 2, y: model.titleY, 'text-anchor': 'middle', class: 'title-text'
+    }, title));
+  }
+
+  const bottom = H - 28;
+
+  for (const a of actors) {
+    g.appendChild(el('line', {
+      x1: a.x, y1: a.y + a.h / 2, x2: a.x, y2: bottom, class: 'seq-life'
+    }));
+  }
+
+  for (const m of messages) {
+    const from = actors.find(a => a.id === m.from);
+    const to = actors.find(a => a.id === m.to);
+    if (!from || !to) continue;
+
+    if (from === to) {
+      const x = from.x, y = m.y;
+      g.appendChild(el('path', {
+        d: `M ${x} ${y} h 34 v 18 h -34`,
+        class: 'seq-msg' + (m.dashed ? ' seq-msg-dashed' : '')
+      }));
+      g.appendChild(el('polygon', {
+        points: `${x},${y + 18} ${x + 9},${y + 14} ${x + 9},${y + 22}`,
+        class: 'arrow-fill'
+      }));
+      g.appendChild(el('text', { x: x + 46, y: y + 10, class: 'seq-msg-text' }, m.label));
+    } else {
+      const dir = to.x > from.x ? 1 : -1;
+      g.appendChild(el('line', {
+        x1: from.x, y1: m.y, x2: to.x - dir * 10, y2: m.y,
+        class: 'seq-msg' + (m.dashed ? ' seq-msg-dashed' : '')
+      }));
+      g.appendChild(el('polygon', {
+        points: `${to.x},${m.y} ${to.x - dir * 11},${m.y - 5} ${to.x - dir * 11},${m.y + 5}`,
+        class: 'arrow-fill'
+      }));
+      g.appendChild(el('text', {
+        x: (from.x + to.x) / 2, y: m.y - 8,
+        'text-anchor': 'middle', class: 'seq-msg-text'
+      }, m.label));
+    }
+  }
+
+  for (const a of actors) {
+    g.appendChild(el('rect', {
+      x: a.x - a.w / 2, y: a.y - a.h / 2,
+      width: a.w, height: a.h, rx: 8, class: 'seq-box'
+    }));
+    g.appendChild(el('text', {
+      x: a.x, y: a.y + 5, 'text-anchor': 'middle', class: 'seq-actor-text'
+    }, a.label));
+  }
+
+  return g;
+}
+
+/* ==========================================================================
+ *  视图状态 & 绘制
+ * ========================================================================== */
+
+let currentModel = null;
+const view = { zoom: 1, panX: 0, panY: 0 };
+let svgEl = null;
+let viewportEl = null;
+let _vbW = 800, _vbH = 600;
+let dragState = null;
+let panState = null;
+let paintQueued = false;
+
+const preview = document.getElementById('preview');
+const statusBar = document.getElementById('status');
+const zoomInfo = document.getElementById('zoominfo');
+
+function setStatus(msg, cls = '') {
+  statusBar.textContent = msg;
+  statusBar.className = cls;
+}
+function updateZoomInfo() {
+  zoomInfo.textContent = Math.round(view.zoom * 100) + '%';
+}
+
+function fitView() {
+  if (!currentModel) return;
+  const W = Math.max(preview.clientWidth, 200);
+  const H = Math.max(preview.clientHeight, 200);
+  const cw = currentModel.contentW || 400;
+  const ch = currentModel.contentH || 300;
+  const pad = 30;
+  const z = Math.min((W - pad * 2) / cw, (H - pad * 2) / ch);
+  view.zoom = clamp(z, 0.08, 1.6);
+  view.panX = (W - cw * view.zoom) / 2;
+  view.panY = (H - ch * view.zoom) / 2;
+  updateZoomInfo();
+}
+
+function paint() {
+  if (!currentModel) return;
+  const W = Math.max(preview.clientWidth, 200);
+  const H = Math.max(preview.clientHeight, 200);
+  _vbW = W; _vbH = H;
+
+  svgEl = el('svg', {
+    xmlns: SVG_NS,
+    viewBox: `0 0 ${W} ${H}`,
+    width: W,
+    height: H
+  });
+  svgEl.appendChild(styleEl(SVG_CSS));
+
+  const content = currentModel.type === 'sequence'
+    ? buildSequenceContent(currentModel)
+    : buildGraphContent(currentModel);
+
+  viewportEl = el('g', {
+    transform: `translate(${view.panX},${view.panY}) scale(${view.zoom})`
+  });
+  viewportEl.appendChild(content);
+  svgEl.appendChild(viewportEl);
+
+  preview.innerHTML = '';
+  preview.appendChild(svgEl);
+
+  // 事件绑定
+  svgEl.addEventListener('pointerdown', onCanvasPointerDown);
+
+  viewportEl.querySelectorAll('[data-node-id]').forEach(elm => {
+    elm.style.cursor = 'grab';
+    elm.addEventListener('pointerdown', onNodePointerDown);
+  });
+
+  updateZoomInfo();
+}
+
+function schedulePaint() {
+  if (paintQueued) return;
+  paintQueued = true;
+  requestAnimationFrame(() => {
+    paintQueued = false;
+    paint();
+  });
+}
+
+/* ---------------- 坐标换算 ---------------- */
+
+function clientToBase(clientX, clientY) {
+  if (!svgEl) return { x: 0, y: 0 };
+  const rect = svgEl.getBoundingClientRect();
+  const sx = rect.width ? _vbW / rect.width : 1;
+  const sy = rect.height ? _vbH / rect.height : 1;
+  const vx = (clientX - rect.left) * sx;
+  const vy = (clientY - rect.top) * sy;
+  return {
+    x: (vx - view.panX) / view.zoom,
+    y: (vy - view.panY) / view.zoom
+  };
+}
+
+/* ---------------- 交互 ---------------- */
+
+function onNodePointerDown(evt) {
+  if (evt.button !== 0) return;
+  const id = evt.currentTarget.getAttribute('data-node-id');
+  if (!currentModel || !currentModel.nodes) return;
+  const node = currentModel.nodes.find(n => n.id === id);
+  if (!node) return;
+
+  evt.stopPropagation();
+  evt.preventDefault();
+
+  const p = clientToBase(evt.clientX, evt.clientY);
+  dragState = {
+    node,
+    offsetX: node.x - p.x,
+    offsetY: node.y - p.y,
+    moved: false
+  };
+  document.body.style.cursor = 'grabbing';
+}
+
+function onCanvasPointerDown(evt) {
+  if (evt.button !== 0 && evt.button !== 1) return;
+  evt.preventDefault();
+  panState = {
+    cx0: evt.clientX,
+    cy0: evt.clientY,
+    panX0: view.panX,
+    panY0: view.panY
+  };
+  document.body.style.cursor = 'grabbing';
+}
+
+document.addEventListener('pointermove', (evt) => {
+  if (dragState) {
+    const p = clientToBase(evt.clientX, evt.clientY);
+    dragState.node.x = p.x + dragState.offsetX;
+    dragState.node.y = p.y + dragState.offsetY;
+    dragState.moved = true;
+    schedulePaint();
+    evt.preventDefault();
+    return;
+  }
+  if (panState) {
+    view.panX = panState.panX0 + (evt.clientX - panState.cx0);
+    view.panY = panState.panY0 + (evt.clientY - panState.cy0);
+    if (viewportEl) {
+      viewportEl.setAttribute('transform',
+        `translate(${view.panX},${view.panY}) scale(${view.zoom})`);
+    }
+    evt.preventDefault();
+  }
+}, { passive: false });
+
+document.addEventListener('pointerup', () => {
+  if (dragState) { dragState = null; document.body.style.cursor = ''; }
+  if (panState) { panState = null; document.body.style.cursor = ''; }
+});
+document.addEventListener('pointercancel', () => {
+  dragState = null; panState = null; document.body.style.cursor = '';
+});
+
+preview.addEventListener('wheel', (evt) => {
+  if (!svgEl || !viewportEl) return;
+  evt.preventDefault();
+
+  const rect = svgEl.getBoundingClientRect();
+  const sx = rect.width ? _vbW / rect.width : 1;
+  const sy = rect.height ? _vbH / rect.height : 1;
+  const mx = (evt.clientX - rect.left) * sx;
+  const my = (evt.clientY - rect.top) * sy;
+
+  const factor = Math.exp(-evt.deltaY * 0.0016);
+  const newZoom = clamp(view.zoom * factor, 0.06, 8);
+  const k = newZoom / view.zoom;
+
+  view.panX = mx - (mx - view.panX) * k;
+  view.panY = my - (my - view.panY) * k;
+  view.zoom = newZoom;
+
+  viewportEl.setAttribute('transform',
+    `translate(${view.panX},${view.panY}) scale(${view.zoom})`);
+  updateZoomInfo();
+}, { passive: false });
+
+/* ==========================================================================
+ *  主流程
+ * ========================================================================== */
+
+function render() {
+  const src = document.getElementById('editor').value;
+  try {
+    const model = parseDSL(src);
+    prepareNodes(model);
+
+    if (model.type === 'sequence') {
+      const dims = layoutSequence(model);
+      model.contentW = dims.width;
+      model.contentH = dims.height;
+    } else {
+      if (model.type === 'activity') {
+        layoutActivity(model);
+        resolveOverlaps(model.nodes, 44, 36);
+      } else if (model.type === 'usecase' && model.boundary) {
+        // 用例图含系统边界：仅对框内元素做力导向布局
+        const insideNodes = model.nodes.filter(n => n.insideBoundary);
+        if (insideNodes.length) {
+          const subModel = { ...model, nodes: insideNodes };
+          layoutForce(subModel);
+        }
+        // 框外元素在 normalizeToOrigin 中统一放置
+      } else {
+        layoutForce(model);
+      }
+      normalizeToOrigin(model);
+    }
+
+    currentModel = model;
+    fitView();
+    paint();
+
+    const count = model.type === 'sequence'
+      ? model.actors.length + model.messages.length
+      : model.nodes.length;
+    setStatus(`✓ 渲染成功 · 类型：${model.type} · 元素数：${count} · 滚轮缩放 / 拖拽元素 / 空白处拖拽平移`, 'ok');
+  } catch (err) {
+    setStatus('✗ ' + err.message, 'err');
+  }
+}
+
+let rafId = null;
+function renderDebounced() {
+  if (rafId) cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(() => { rafId = null; render(); });
+}
+
+/* ---------------- 导出 ---------------- */
+
+function serializeSVG(svg) {
+  const clone = svg.cloneNode(true);
+  clone.setAttribute('xmlns', SVG_NS);
+  clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+  const vb = (svg.getAttribute('viewBox') || '0 0 800 600').split(/\s+/);
+  clone.setAttribute('width', vb[2]);
+  clone.setAttribute('height', vb[3]);
+  // 移除交互用的透明命中框
+  clone.querySelectorAll('.hit').forEach(n => n.remove());
+  const s = new XMLSerializer().serializeToString(clone);
+  return '<?xml version="1.0" encoding="UTF-8"?>\n' + s;
+}
+
+function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function downloadSVG() {
+  const svg = preview.querySelector('svg');
+  if (!svg) return setStatus('没有可导出的图形', 'err');
+  saveBlob(new Blob([serializeSVG(svg)], { type: 'image/svg+xml;charset=utf-8' }), 'diagram.svg');
+  setStatus('已导出 diagram.svg', 'ok');
+}
+
+function downloadPNG(scale = 2) {
+  const svg = preview.querySelector('svg');
+  if (!svg) return setStatus('没有可导出的图形', 'err');
+
+  const vb = (svg.getAttribute('viewBox') || '0 0 800 600').split(/\s+/).map(Number);
+  const w = vb[2], h = vb[3];
+  const str = serializeSVG(svg);
+
+  const blob = new Blob([str], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+
+  img.onload = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(w * scale);
+    canvas.height = Math.round(h * scale);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(b => {
+      if (b) { saveBlob(b, 'diagram.png'); setStatus('已导出 diagram.png', 'ok'); }
+      else setStatus('PNG 导出失败', 'err');
+      URL.revokeObjectURL(url);
+    }, 'image/png');
+  };
+  img.onerror = () => {
+    setStatus('PNG 导出失败（SVG 转换错误）', 'err');
+    URL.revokeObjectURL(url);
+  };
+  img.src = url;
+}
+
+/* ---------------- UI 绑定 ---------------- */
+
+const editor = document.getElementById('editor');
+editor.addEventListener('input', renderDebounced);
+
+document.getElementById('btn-svg').addEventListener('click', downloadSVG);
+document.getElementById('btn-png').addEventListener('click', () => downloadPNG(2));
+
+document.getElementById('btn-src').addEventListener('click', () => {
+  saveBlob(new Blob([editor.value], { type: 'text/plain;charset=utf-8' }), 'diagram.uml');
+  setStatus('已导出 diagram.uml', 'ok');
+});
+
+document.getElementById('btn-copy').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(editor.value);
+    setStatus('已复制到剪贴板', 'ok');
+  } catch (e) {
+    setStatus('复制失败，请手动选择文本', 'err');
+  }
+});
+
+document.getElementById('btn-doc').addEventListener('click', () => {
+  const md = document.getElementById('spec-doc').textContent.replace(/^\n+/, '');
+  saveBlob(new Blob([md], { type: 'text/markdown;charset=utf-8' }), 'UMLite-Spec.md');
+  setStatus('已导出语言规范文档 UMLite-Spec.md', 'ok');
+});
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+  if (!currentModel) return;
+  fitView();
+  paint();
+  setStatus('视图已复位', 'ok');
+});
+
+document.getElementById('btn-refresh').addEventListener('click', () => {
+  render();
+  if (currentModel) setStatus('✓ 已重新渲染', 'ok');
+});
+
+/* ---------------- 分隔条拖拽（面板宽度可调） ---------------- */
+
+const divider = document.getElementById('divider');
+const mainEl = document.querySelector('main');
+let dividerDragState = null;
+
+divider.addEventListener('pointerdown', (evt) => {
+  if (evt.button !== 0) return;
+  evt.preventDefault();
+  dividerDragState = { startX: evt.clientX, startLeft: parseFloat(getComputedStyle(mainEl).getPropertyValue('--left-width')) || 44 };
+  divider.classList.add('active');
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+});
+
+document.addEventListener('pointermove', (evt) => {
+  if (!dividerDragState) return;
+  const mainRect = mainEl.getBoundingClientRect();
+  const pct = ((evt.clientX - mainRect.left) / mainRect.width) * 100;
+  const newLeft = Math.max(20, Math.min(80, pct)); // 限制在 20%~80% 之间
+  mainEl.style.setProperty('--left-width', newLeft + '%');
+});
+
+document.addEventListener('pointerup', () => {
+  if (!dividerDragState) return;
+  dividerDragState = null;
+  divider.classList.remove('active');
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+  // 拖拽后触发一次渲染以适配新尺寸
+  if (currentModel) { fitView(); paint(); }
+});
+document.addEventListener('pointercancel', () => {
+  if (!dividerDragState) return;
+  dividerDragState = null;
+  divider.classList.remove('active');
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+});
+
+window.addEventListener('resize', () => {
+  clearTimeout(window.__rt);
+  window.__rt = setTimeout(() => {
+    if (!currentModel) return;
+    fitView();
+    paint();
+  }, 160);
+});
+
+/* ---------------- 内置示例 ---------------- */
+
+const SAMPLES = {
+  '类图 · 电商系统': `@diagram class "电商系统类图"
+
+abstract class BaseEntity {
+  # id: String
+  # createdAt: Date
+  + getId(): String
+}
+
+interface Payable {
+  + pay(amount: Double): Boolean
+}
+
+class User {
+  - username: String
+  - email: String
+  + login(pwd: String): Boolean
+  + logout(): void
+}
+
+class Order {
+  + orderNo: String
+  + total: Double
+  + submit(): void
+}
+
+class OrderItem {
+  + qty: Int
+  + price: Double
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  SHIPPED
+}
+
+User "1" --> "*" Order : 下单
+Order "1" *-- "1..*" OrderItem : 包含
+Order ..|> Payable : 实现
+User --|> BaseEntity : 继承
+Order --> OrderStatus : 状态
+`,
+
+  '用例图 · 图书馆': `@diagram usecase "图书馆管理系统用例图"
+
+boundary "图书管理系统"
+
+actor 读者
+actor 管理员
+actor 系统管理员
+
+usecase 查询图书 :boundary
+usecase 借阅图书 :boundary
+usecase 归还图书 :boundary
+usecase 续借图书 :boundary
+usecase 管理图书 :boundary
+usecase 管理用户 :boundary
+usecase 生成报表 :boundary
+
+读者 --> 查询图书
+读者 --> 借阅图书
+读者 --> 归还图书
+读者 --> 续借图书
+管理员 --> 管理图书
+管理员 --> 管理用户
+管理员 --> 生成报表
+系统管理员 --> 管理用户
+
+借阅图书 ..> 查询图书 : «include»
+归还图书 ..> 查询图书 : «include»
+续借图书 ..> 查询图书 : «include»
+`,
+
+  '活动图 · 订单处理': `@diagram activity "订单处理流程"
+
+start
+:接收用户订单;
+:校验订单参数;
+if (库存是否充足?)
+  :锁定库存;
+  :生成支付单;
+  if (支付是否成功?)
+    :更新订单状态为已支付;
+    :通知仓库发货;
+  else
+    :释放库存;
+    :订单关闭;
+  endif
+else
+  :提示用户缺货;
+  :推荐相似商品;
+endif
+:发送结果通知;
+stop
+`,
+
+  'E-R 图 · 电商数据库': `@diagram er "电商数据库 E-R 图"
+
+entity 用户 {
+  * id: BIGINT «PK»
+  username: VARCHAR(50)
+  email: VARCHAR(120)
+  created_at: DATETIME
+}
+
+entity 订单 {
+  * id: BIGINT «PK»
+  user_id: BIGINT «FK»
+  total: DECIMAL(10,2)
+  status: TINYINT
+}
+
+entity 订单项 {
+  * id: BIGINT «PK»
+  order_id: BIGINT «FK»
+  product_id: BIGINT «FK»
+  qty: INT
+}
+
+entity 商品 {
+  * id: BIGINT «PK»
+  title: VARCHAR(200)
+  price: DECIMAL(10,2)
+  stock: INT
+}
+
+用户 ||--o{ 订单 : "下单"
+订单 ||--|{ 订单项 : "包含"
+商品 ||--o{ 订单项 : "被购买"
+`,
+
+  '时序图 · 登录流程': `@diagram sequence "用户登录时序图"
+
+participant 用户
+participant 浏览器 as Browser
+participant 网关 as Gateway
+participant 认证服务 as AuthService
+participant 数据库 as DB
+
+用户 -> Browser : 输入账号密码
+Browser -> Gateway : POST /api/login
+Gateway -> AuthService : 转发登录请求
+AuthService -> DB : 查询用户记录
+DB --> AuthService : 返回用户数据
+AuthService --> Gateway : 签发 JWT Token
+Gateway --> Browser : 200 OK + Token
+Browser --> 用户 : 跳转首页
+`,
+
+  '状态图 · 订单状态': `@diagram state "订单状态机"
+
+[*] --> 待支付
+待支付 --> 已支付 : 支付成功
+待支付 --> 已取消 : 超时/取消
+已支付 --> 已发货 : 仓库发货
+已发货 --> 已完成 : 用户签收
+已发货 --> 退货中 : 申请退货
+退货中 --> 已退款 : 退款成功
+已支付 --> 已退款 : 主动退款
+已取消 --> [*]
+已完成 --> [*]
+已退款 --> [*]
+`,
+
+  '组件图 · 微服务': `@diagram component "微服务架构组件图"
+
+component 网关服务 {
+  + 路由转发
+  + 鉴权过滤
+}
+
+component 用户服务 {
+  + 用户注册
+  + 用户登录
+}
+
+component 订单服务 {
+  + 创建订单
+  + 查询订单
+}
+
+component 支付服务 {
+  + 发起支付
+  + 支付回调
+}
+
+component 消息队列
+component 配置中心
+component 数据库
+
+网关服务 ..> 用户服务 : HTTP
+网关服务 ..> 订单服务 : HTTP
+订单服务 ..> 支付服务 : RPC
+订单服务 --> 消息队列 : 发布事件
+支付服务 --> 消息队列 : 发布事件
+用户服务 --> 数据库 : JDBC
+订单服务 --> 数据库 : JDBC
+网关服务 ..> 配置中心 : 拉取配置
+`,
+
+  '部署图 · 生产环境': `@diagram deployment "生产环境部署图"
+
+node 客户端 {
+  artifact 浏览器
+  artifact 移动App
+}
+
+node 负载均衡 {
+  artifact Nginx
+}
+
+node 应用服务器 {
+  artifact 用户服务.jar
+  artifact 订单服务.jar
+}
+
+node 数据库服务器 {
+  database MySQL
+  database Redis
+}
+
+客户端 --> 负载均衡 : HTTPS
+负载均衡 --> 应用服务器 : HTTP
+应用服务器 --> 数据库服务器 : TCP
+`,
+
+  '对象图 · 快照': `@diagram object "订单对象快照"
+
+object 用户张三 {
+  id = "U1001"
+  name = "张三"
+  vipLevel = 3
+}
+
+object 订单A {
+  orderNo = "SO20240001"
+  total = 299.00
+  status = "PAID"
+}
+
+object 商品X {
+  sku = "SKU-001"
+  price = 299.00
+}
+
+用户张三 --> 订单A : 拥有
+订单A --> 商品X : 包含
+`,
+
+  '包图 · 分层架构': `@diagram package "系统分层包图"
+
+package 表现层 {
+  class UserController
+  class OrderController
+}
+
+package 业务层 {
+  class UserService
+  class OrderService
+}
+
+package 数据层 {
+  class UserRepository
+  class OrderRepository
+}
+
+表现层 ..> 业务层 : 调用
+业务层 ..> 数据层 : 调用
+`
+};
+
+const sampleSelect = document.getElementById('samples');
+const ph = document.createElement('option');
+ph.textContent = '📚 载入示例…';
+ph.value = '';
+sampleSelect.appendChild(ph);
+for (const name of Object.keys(SAMPLES)) {
+  const o = document.createElement('option');
+  o.value = name;
+  o.textContent = name;
+  sampleSelect.appendChild(o);
+}
+sampleSelect.addEventListener('change', () => {
+  const name = sampleSelect.value;
+  if (!name) return;
+  editor.value = SAMPLES[name];
+  render();
+  sampleSelect.value = '';
+});
+
+/* ---------------- 启动 ---------------- */
+
+editor.value = SAMPLES['类图 · 电商系统'];
+requestAnimationFrame(() => render());
+</script>
+</body>
+</html>
