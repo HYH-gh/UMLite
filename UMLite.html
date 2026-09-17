@@ -529,7 +529,7 @@ component <组件名> [{
 <组件 A> ..> <组件 B> : 依赖说明
 ```
 
-组件与类图使用相同的节点 / 关系写法，仅样式不同（淡紫色标题栏）。
+组件使用**紫色标题栏 + 左侧组件图标**样式（两个小矩形）。
 
 ### 9.2 示例
 
@@ -671,7 +671,49 @@ package 数据层 {
 
 ---
 
-## 13. 完整示例（综合）
+## 13. 便签框（notice）
+
+### 13.1 语法
+
+```
+notice <标题>
+notice <标题> {
+    <内容行 1>
+    <内容行 2>
+}
+<任意元素> --> <notice 标题> : 关联说明
+```
+
+- `notice` 在所有图类型中均可使用。
+- 渲染为右上角有**折角**的黄色便签框。
+- 通过关系运算符可与其他元素自由连接。
+
+### 13.2 示例
+
+```
+@diagram class "订单系统设计备注"
+
+class Order {
+    + orderNo: String
+    + total: Double
+}
+
+notice "待讨论" {
+    - 是否需要支持分表?
+    - 并发扣库存场景
+}
+
+notice "已确认" {
+    使用分布式锁方案
+}
+
+Order --> 待讨论 : 关联
+待讨论 ..> 已确认 : 推进
+```
+
+---
+
+## 14. 完整示例（综合）
 
 ```
 @diagram class "订单领域模型"
@@ -748,6 +790,7 @@ function el(tag, attrs = {}, children = []) {
   const e = document.createElementNS(SVG_NS, tag);
   for (const k in attrs) {
     if (attrs[k] === undefined || attrs[k] === null) continue;
+    if (typeof attrs[k] === 'number' && !isFinite(attrs[k])) continue;
     e.setAttribute(k, attrs[k]);
   }
   for (const c of [].concat(children)) {
@@ -778,7 +821,10 @@ const DIAGRAM_ALIASES = {
   package: 'package', '包图': 'package'
 };
 
-const ARROWS = ['--|>', '<|--', '..|>', '<|..', '-->', '<--', '..>', '<..',
+const ARROWS = ['||--o{', '||--||', '||--|{', '}o--||', '}o--|{', '}o--o{', '--o{', '--||', '--|{', '||--', '}o--',
+                'o{--||', 'o{--|{', 'o{--o{', '|{--||', '|{--|{', '|{--o{', '||--}o', '|{--}o', 'o{--}o',
+                'o{--', '|{--', '--}o',
+                '--|>', '<|--', '..|>', '<|..', '-->', '<--', '..>', '<..',
                 '--*', '*--', '--o', 'o--', '->', '<-', '--', '..'];
 
 const ARROW_SPEC = {
@@ -792,10 +838,23 @@ const ARROW_SPEC = {
   '..':   { kind: 'dependency',     dash: true,  head: 'none' },
   '->':   { kind: 'association',    dash: false, head: 'open' }
 };
+// E-R 图关系箭头（继承 association 线型）
+for (const a of ['||--o{','||--||','||--|{','}o--||','}o--|{','}o--o{','--o{','--||','--|{','||--','}o--',
+                'o{--||','o{--|{','o{--o{','|{--||','|{--|{','|{--o{','||--}o','|{--}o','o{--}o',
+                'o{--','|{--','--}o']) {
+  ARROW_SPEC[a] = { kind: 'association', dash: false, head: 'none' };
+}
 const ARROW_NORMALIZE = {
   '<--': '-->', '<|--': '--|>', '<|..': '..|>', '<..': '..>', '<-': '->',
   '--*': '*--', '--o': 'o--'
 };
+// E-R 箭头反向映射
+const _erRev = { '||--o{':'o{--||','||--||':'||--||','||--|{':'|{--||','}o--||':'||--}o','}o--|{':'|{--}o','}o--o{':'o{--}o','--o{':'o{--','--||':'||--','--|{':'|{--','||--':'--||','}o--':'--}o' };
+for (const [k,v] of Object.entries(_erRev)) ARROW_NORMALIZE[k] = v;
+// 将反向 E-R 箭头也加入 ARROW_SPEC
+for (const a of Object.values(_erRev)) {
+  if (!ARROW_SPEC[a]) ARROW_SPEC[a] = { kind: 'association', dash: false, head: 'none' };
+}
 
 function findArrow(s) {
   let best = null;
@@ -848,12 +907,29 @@ function parseEdgeLine(text) {
   right = right.replace(/\s+/g, ' ').trim();
   if (!left || !right) return null;
 
+  // E-R 图多重性标记：从箭头模式中提取 || }o o{ |{ 等标记
+  const ER_ARROW_MULT = {
+    '||--o{':{lm:'||',rm:'o{'},'||--||':{lm:'||',rm:'||'},'||--|{':{lm:'||',rm:'|{'},
+    '}o--||':{lm:'}o',rm:'||'},'}o--|{':{lm:'}o',rm:'|{'},'}o--o{':{lm:'}o',rm:'o{'},
+    '--o{':{rm:'o{'},'--||':{rm:'||'},'--|{':{rm:'|{'},'||--':{lm:'||'},'}o--':{lm:'}o'},
+    // 反方向（已通过 ARROW_NORMALIZE 翻转，这里为兜底保留）
+    'o{--||':{lm:'o{',rm:'||'},'o{--|{':{lm:'o{',rm:'|{'},'o{--o{':{lm:'o{',rm:'o{'},
+    '|{--||':{lm:'|{',rm:'||'},'|{--|{':{lm:'|{',rm:'|{'},'|{--o{':{lm:'|{',rm:'o{'},
+    '||--}o':{lm:'||',rm:'}o'},'|{--}o':{lm:'|{',rm:'}o'},'o{--}o':{lm:'o{',rm:'}o'},
+    'o{--':{lm:'o{'},'|{--':{lm:'|{'},'--}o':{rm:'}o'},
+  };
+  const erMult = ER_ARROW_MULT[arrow];
+  if (erMult) {
+    if (erMult.lm && !lm) lm = erMult.lm;
+    if (erMult.rm && !rm) rm = erMult.rm;
+  }
+
   return { from: left, to: right, arrow, lm, rm, label, spec: ARROW_SPEC[arrow] || ARROW_SPEC['--'] };
 }
 
 /* -------- 类图 / ER / 状态 / 组件 / 部署 / 对象 / 包 / 用例 -------- */
 
-const DECL_RE = /^(abstract\s+class|class|interface|enum|struct|annotation|trait|entity|component|node|artifact|object|package|state|actor|usecase|database|table|boundary)\b(.*)$/i;
+const DECL_RE = /^(abstract\s+class|class|interface|enum|struct|annotation|trait|entity|component|node|artifact|object|package|state|actor|usecase|database|table|boundary|notice)\b(.*)$/i;
 
 function parseClassLike(lines, type) {
   const nodes = new Map();
@@ -921,15 +997,44 @@ function parseClassLike(lines, type) {
 
     const e = parseEdgeLine(text);
     if (e) {
-      const fromId = resolveRef(e.from);
-      const toId = resolveRef(e.to);
-      ensure(fromId); ensure(toId);
-      edges.push({
-        from: fromId, to: toId, label: e.label,
-        fromMult: e.lm, toMult: e.rm,
-        kind: e.spec.kind, dash: e.spec.dash,
-        head: e.spec.head, tailDiamond: e.spec.tailDiamond || null
-      });
+      let fromId = resolveRef(e.from);
+      let toId = resolveRef(e.to);
+      // E-R 图：清理左右两侧残留的多重性标记（如 User || -- Post 带空格的情况）
+      if (type === 'er') {
+        const sf = fromId.match(/^(.+?)\s+(\|\||\|\{|}o|}||o\|)$/);
+        if (sf) { fromId = sf[1]; if (!e.lm) e.lm = sf[2]; }
+        const st = toId.match(/^(\|\||o\{|\|\{|}\||\|o)\s+(.+)$/);
+        if (st) { toId = st[2]; if (!e.rm) e.rm = st[1]; }
+      }
+      // 检测连线中点引用：A--B 或 A..B 格式，指向已有节点间连线的中点
+      const midRefRe = /^([\w\u4e00-\u9fff.\[\]$]+)(--|\.\.)([\w\u4e00-\u9fff.\[\]$]+)$/;
+      const toMid = toId.match(midRefRe);
+      const fromMid = fromId.match(midRefRe);
+      if (toMid) {
+        edges.push({
+          from: fromId, to: null, label: e.label,
+          fromMult: e.lm, toMult: e.rm,
+          kind: e.spec.kind, dash: e.spec.dash,
+          head: e.spec.head,
+          connectToMidpoint: { from: toMid[1], to: toMid[3] }
+        });
+      } else if (fromMid) {
+        edges.push({
+          from: null, to: toId, label: e.label,
+          fromMult: e.lm, toMult: e.rm,
+          kind: e.spec.kind, dash: e.spec.dash,
+          head: e.spec.head,
+          connectToMidpoint: { from: fromMid[1], to: fromMid[3] }
+        });
+      } else {
+        ensure(fromId); ensure(toId);
+        edges.push({
+          from: fromId, to: toId, label: e.label,
+          fromMult: e.lm, toMult: e.rm,
+          kind: e.spec.kind, dash: e.spec.dash,
+          head: e.spec.head, tailDiamond: e.spec.tailDiamond || null
+        });
+      }
       i++;
       continue;
     }
@@ -1161,12 +1266,29 @@ function prepareNodes(model) {
       continue;
     }
 
+    if (n.kind === 'notice') {
+      n.shape = 'notice';
+      const mems = n.members || [];
+      let w = textWidth(n.label, 13, '600') + 40;
+      for (const m of mems) w = Math.max(w, textWidth(m, 12.5) + 30);
+      n.w = Math.max(w, 120);
+      n.h = mems.length ? 20 + mems.length * 18 + 8 : 40;
+      continue;
+    }
+
     const mems = n.members || [];
+    // 将类成员分为属性和方法
+    const isMeth = m => /\(.*\)/.test(m);
+    n._attrCount = mems.filter(m => !isMeth(m)).length;
+    n._methodCount = mems.filter(m => isMeth(m)).length;
+    n._hasSep = n._attrCount > 0 && n._methodCount > 0;
+
     let w = textWidth(n.label, 14, '600') + 40;
     for (const m of mems) w = Math.max(w, textWidth(m, 12.5) + 30);
     n.shape = 'rect';
     n.w = Math.max(w, 124);
-    n.h = mems.length ? 34 + mems.length * 18 + 8 : 44;
+    const extraH = n._hasSep ? 16 : 0; // 分隔线额外高度
+    n.h = mems.length ? 34 + mems.length * 18 + extraH + 8 : 44;
   }
 }
 
@@ -1586,6 +1708,37 @@ function drawEdgeLabel(g, x, y, text) {
 }
 
 function drawEdge(g, e, nodeMap) {
+  // 连线中点引用：notice ..> A--B 指向已有连线的中点
+  if (e.connectToMidpoint) {
+    const refA = nodeMap.get(e.connectToMidpoint.from);
+    const refB = nodeMap.get(e.connectToMidpoint.to);
+    if (!refA || !refB) return;
+    const mx = (refA.x + refB.x) / 2, my = (refA.y + refB.y) / 2;
+    const mp = { x: mx, y: my };
+    let src, dst;
+    if (e.from) {
+      src = nodeMap.get(e.from);
+      dst = mp;
+    } else {
+      src = nodeMap.get(e.to);
+      dst = mp;
+    }
+    if (!src) return;
+    const p = clipPoint(src, dst.x, dst.y);
+    const ang = Math.atan2(dst.y - p.y, dst.x - p.x);
+    g.appendChild(el('line', {
+      x1: p.x, y1: p.y, x2: dst.x, y2: dst.y,
+      class: 'edge-line' + (e.dash ? ' edge-dashed' : '')
+    }));
+    if (e.head && e.head !== 'none') addArrowHead(g, dst, ang, e.head);
+    // 标签应位于便签自身连线的中点，而非目标线的中点
+    if (e.label) {
+      const lx = (p.x + dst.x) / 2, ly = (p.y + dst.y) / 2;
+      drawEdgeLabel(g, lx, ly - 8, e.label);
+    }
+    return;
+  }
+
   const a = nodeMap.get(e.from);
   const b = nodeMap.get(e.to);
   if (!a || !b) return;
@@ -1693,36 +1846,302 @@ function drawNode(g, n, type) {
     return;
   }
 
-  const isSoft = (type === 'component' || type === 'deployment' || type === 'package');
+  /********** 包图 - Folder 标签样式 **********/
+  if (n.kind === 'package') {
+    const tabW = Math.min(textWidth(n.label, 13, '600') + 28, n.w * 0.55);
+    const tabH = 22;
+    // 主体矩形（顶部不设圆角，用细线封住缺口）
+    g.appendChild(el('rect', {
+      x: x, y: y + tabH, width: n.w, height: n.h - tabH, rx: 5,
+      fill: '#fffbeb', stroke: '#f59e0b', 'stroke-width': 1.5
+    }));
+    // 左侧缺口遮盖线
+    g.appendChild(el('line', {
+      x1: x, y1: y + tabH + 1, x2: x + 4, y2: y + tabH + 1,
+      stroke: '#fffbeb', 'stroke-width': 1.5
+    }));
+    // 标签（左上角凸出的矩形）
+    g.appendChild(el('rect', {
+      x, y, width: tabW, height: tabH, rx: 4,
+      fill: '#fde68a', stroke: '#f59e0b', 'stroke-width': 1.5
+    }));
+    // 标签与主体之间的连接（用一条线遮盖接缝）
+    g.appendChild(el('line', {
+      x1: x, y1: y + tabH, x2: x + tabW, y2: y + tabH,
+      stroke: '#fde68a', 'stroke-width': 2
+    }));
+    // 主体右边和底边补齐（盖住圆角过渡）
+    g.appendChild(el('rect', {
+      x: x + tabW - 5, y: y + tabH, width: n.w - tabW + 5, height: 1.5,
+      fill: '#f59e0b'
+    }));
+    g.appendChild(el('text', {
+      x: x + 12, y: y + tabH - 5, 'text-anchor': 'start', class: 'node-title-sm',
+      fill: '#92400e'
+    }, n.label));
+
+    // 包内成员显示在主体中
+    (n.members || []).forEach((m, i) => {
+      g.appendChild(el('text', {
+        x: x + 14, y: y + tabH + 22 + i * 18, class: 'node-member',
+        fill: '#78350f'
+      }, m));
+    });
+    return;
+  }
+
+  /********** 部署图 node - 3D 立体盒子 **********/
+  if (n.kind === 'node') {
+    const dep = 8; // 3D 深度
+    // 侧面
+    g.appendChild(el('polygon', {
+      points: `${x + dep},${y + dep} ${x + n.w + dep},${y + dep} ${x + n.w},${y} ${x},${y}`,
+      fill: '#d1fae5', stroke: '#10b981', 'stroke-width': 1
+    }));
+    g.appendChild(el('polygon', {
+      points: `${x + n.w},${y} ${x + n.w + dep},${y + dep} ${x + n.w + dep},${y + n.h + dep} ${x + n.w},${y + n.h}`,
+      fill: '#a7f3d0', stroke: '#10b981', 'stroke-width': 1
+    }));
+    // 底部面（3D 延伸到底部的平行四边形，在正面之前绘制以获得正确层叠）
+    g.appendChild(el('polygon', {
+      points: `${x},${y + n.h} ${x + n.w},${y + n.h} ${x + n.w + dep},${y + n.h + dep} ${x + dep},${y + n.h + dep}`,
+      fill: '#d1fae5', stroke: '#10b981', 'stroke-width': 1
+    }));
+    g.appendChild(el('polygon', {
+      points: `${x},${y} ${x + n.w},${y} ${x + n.w},${y + n.h} ${x},${y + n.h}`,
+      fill: '#ecfdf5', stroke: '#10b981', 'stroke-width': 1.5
+    }));
+    // 标题行
+    const headH = 30;
+    g.appendChild(el('line', {
+      x1: x, y1: y + headH, x2: x + n.w, y2: y + headH,
+      stroke: '#10b981', 'stroke-width': 1
+    }));
+    g.appendChild(el('text', {
+      x: n.x, y: y + headH - 9, 'text-anchor': 'middle', class: 'node-title-sm',
+      fill: '#065f46'
+    }, `«node» ${n.label}`));
+    (n.members || []).forEach((m, i) => {
+      g.appendChild(el('text', {
+        x: x + 12, y: y + headH + 18 + i * 18, class: 'node-member',
+        fill: '#064e3b'
+      }, m));
+    });
+    return;
+  }
+
+  /********** artifact - 文档图标样式 **********/
+  if (n.kind === 'artifact') {
+    g.appendChild(el('rect', {
+      x, y, width: n.w, height: n.h, rx: 4,
+      fill: '#fff7ed', stroke: '#f97316', 'stroke-width': 1.5
+    }));
+    // 右上角折角装饰
+    const fold = 16;
+    g.appendChild(el('path', {
+      d: `M${x + n.w - fold},${y} L${x + n.w},${y + fold}`,
+      stroke: '#f97316', 'stroke-width': 1.5, fill: 'none'
+    }));
+    g.appendChild(el('polygon', {
+      points: `${x + n.w - fold},${y} ${x + n.w},${y} ${x + n.w},${y + fold}`,
+      fill: '#fed7aa'
+    }));
+    // 标题
+    const headH = 28;
+    g.appendChild(el('line', {
+      x1: x + 8, y1: y + headH, x2: x + n.w - 8, y2: y + headH,
+      stroke: '#f97316', 'stroke-width': 0.8, 'stroke-dasharray': '4 3'
+    }));
+    g.appendChild(el('text', {
+      x: x + 12, y: y + headH - 7, 'text-anchor': 'start', class: 'node-title-sm',
+      fill: '#9a3412'
+    }, `«artifact» ${n.label}`));
+    (n.members || []).forEach((m, i) => {
+      g.appendChild(el('text', {
+        x: x + 12, y: y + headH + 18 + i * 18, class: 'node-member',
+        fill: '#7c2d12'
+      }, m));
+    });
+    return;
+  }
+
+  /********** database - 圆柱体 **********/
+  if (n.kind === 'database') {
+    const r = n.w / 2;
+    const cy2 = y + n.h;
+    const cy1 = y + 16;
+    // 主体（四肢路径：矩形 + 底部椭圆露出）
+    g.appendChild(el('path', {
+      d: `M ${x},${cy1} L ${x},${cy2 - 10} A ${r} 10 0 0 0 ${x + n.w},${cy2 - 10} L ${x + n.w},${cy1}`,
+      fill: '#f0fdfa', stroke: '#14b8a6', 'stroke-width': 1.5
+    }));
+    // 顶部椭圆
+    g.appendChild(el('ellipse', {
+      cx: n.x, cy: cy1, rx: r, ry: 10,
+      fill: '#ccfbf1', stroke: '#14b8a6', 'stroke-width': 1.5
+    }));
+    // 底部弧线
+    g.appendChild(el('path', {
+      d: `M ${x},${cy2 - 10} A ${r} 10 0 0 0 ${x + n.w},${cy2 - 10}`,
+      fill: 'none', stroke: '#14b8a6', 'stroke-width': 1.5
+    }));
+    // 标题
+    g.appendChild(el('text', {
+      x: n.x, y: cy1 + 3, 'text-anchor': 'middle', class: 'node-title-sm',
+      fill: '#134e4a'
+    }, n.label));
+    return;
+  }
+
+  /********** notice - 便签框（折角） **********/
+  if (n.kind === 'notice') {
+    const F = 16; // 折角大小
+    g.appendChild(el('polygon', {
+      points: `${x},${y} ${x + n.w - F},${y} ${x + n.w},${y + F} ${x + n.w},${y + n.h} ${x},${y + n.h}`,
+      fill: '#fefce8', stroke: '#eab308', 'stroke-width': 1.5
+    }));
+    // 折角折痕线
+    g.appendChild(el('line', {
+      x1: x + n.w - F, y1: y, x2: x + n.w, y2: y + F,
+      stroke: '#eab308', 'stroke-width': 1.5
+    }));
+    // 折角阴影三角形
+    g.appendChild(el('polygon', {
+      points: `${x + n.w - F},${y} ${x + n.w - F + 4},${y + 4} ${x + n.w},${y + F}`,
+      fill: '#fef08a', stroke: 'none', opacity: 0.5
+    }));
+    // 标题与内容
+    let contentY = y + 18;
+    g.appendChild(el('text', {
+      x: x + 12, y: contentY, 'text-anchor': 'start', class: 'node-title-sm',
+      fill: '#713f12'
+    }, n.label));
+    contentY += 4;
+    (n.members || []).forEach((m, i) => {
+      g.appendChild(el('text', {
+        x: x + 12, y: contentY + 18 + i * 18, class: 'node-member',
+        fill: '#713f12'
+      }, m));
+    });
+    return;
+  }
+
+  /********** component - 带组件图标的标题栏 **********/
+  if (n.kind === 'component') {
+    const headH = 34;
+    g.appendChild(el('rect', {
+      x, y, width: n.w, height: n.h, rx: 6,
+      fill: '#f5f3ff', stroke: '#8b5cf6', 'stroke-width': 1.5
+    }));
+    g.appendChild(el('rect', {
+      x, y, width: n.w, height: headH,
+      fill: '#ede9fe', stroke: '#8b5cf6', 'stroke-width': 1.5
+    }));
+    g.appendChild(el('rect', {
+      x, y: y + headH - 8, width: n.w, height: 8,
+      fill: '#ede9fe', stroke: 'none'
+    }));
+    g.appendChild(el('line', {
+      x1: x, y1: y + headH, x2: x + n.w, y2: y + headH,
+      stroke: '#8b5cf6', 'stroke-width': 1
+    }));
+    // 组件小图标（两个小矩形在左侧）
+    const iconX = x + 10, iconY = y + 7;
+    g.appendChild(el('rect', {
+      x: iconX, y: iconY, width: 8, height: 8, rx: 1.5,
+      fill: '#a78bfa', stroke: 'none'
+    }));
+    g.appendChild(el('rect', {
+      x: iconX, y: iconY + 10, width: 8, height: 8, rx: 1.5,
+      fill: '#a78bfa', stroke: 'none'
+    }));
+    // 标题
+    g.appendChild(el('text', {
+      x: iconX + 18, y: y + 22, 'text-anchor': 'start', class: 'node-title',
+      fill: '#5b21b6'
+    }, n.label));
+    // 成员
+    (n.members || []).forEach((m, i) => {
+      g.appendChild(el('text', {
+        x: x + 12, y: y + headH + 20 + i * 18, class: 'node-member',
+        fill: '#4c1d95'
+      }, m));
+    });
+    return;
+  }
+
+  /********** 默认矩形框（类图等）- 包含属性和方法分栏 **********/
   const headH = 34;
+  const kw = n.kind === 'abstract' ? '«abstract» ' : '';
 
   g.appendChild(el('rect', {
     x, y, width: n.w, height: n.h, rx: 6,
-    class: isSoft ? 'node-box-soft' : 'node-box'
+    class: 'node-box'
   }));
   g.appendChild(el('rect', {
     x, y, width: n.w, height: headH,
-    class: isSoft ? 'node-header-soft' : 'node-header'
+    class: 'node-header'
   }));
   g.appendChild(el('rect', {
     x, y: y + headH - 7, width: n.w, height: 7,
-    class: isSoft ? 'node-header-soft' : 'node-header', stroke: 'none'
+    class: 'node-header', stroke: 'none'
   }));
   g.appendChild(el('line', {
-    x1: x, y1: y + headH, x2: x + n.w, y2: y + headH,
-    stroke: isSoft ? '#a78bfa' : '#94a3b8', 'stroke-width': 1
+    x1: x, y1: y + headH , x2: x + n.w, y2: y + headH,
+    stroke: '#94a3b8', 'stroke-width': 1
   }));
 
-  const kw = n.kind === 'abstract' ? '«abstract» ' : '';
   g.appendChild(el('text', {
     x: n.x, y: y + 22, 'text-anchor': 'middle', class: 'node-title'
   }, kw + n.label));
 
-  (n.members || []).forEach((m, i) => {
-    g.appendChild(el('text', {
-      x: x + 12, y: y + headH + 20 + i * 18, class: 'node-member'
-    }, m));
-  });
+  const mems = n.members || [];
+
+  // E-R 图实体：字段含 VARCHAR(200)、DECIMAL(10,2) 等括号内容，不做属性/方法分栏
+  if (type === 'er') {
+    for (let i = 0; i < mems.length; i++) {
+      g.appendChild(el('text', {
+        x: x + 12, y: y + headH + 20 + i * 20, class: 'node-member',
+        fill: '#1e293b'
+      }, mems[i]));
+    }
+    return;
+  }
+
+  const isMeth = m => /\(.*\)/.test(m);
+  const sepY = headH + 20; // 第一行基线
+
+  let attrIdx = 0, methIdx = 0;
+  for (const m of mems) {
+    if (!isMeth(m)) {
+      // 属性
+      g.appendChild(el('text', {
+        x: x + 12, y: y + sepY + attrIdx * 18, class: 'node-member'
+      }, m));
+      attrIdx++;
+    }
+  }
+
+  // 属性和方法之间的分隔线
+  if (n._hasSep) {
+    const sy = y + sepY + n._attrCount * 18 + 4;
+    g.appendChild(el('line', {
+      x1: x + 8, y1: sy - 8, x2: x + n.w - 8, y2: sy - 8,
+      stroke: '#94a3b8', 'stroke-width': 2
+    }));
+  }
+
+  for (const m of mems) {
+    if (isMeth(m)) {
+      // 方法
+      const mi = methIdx;
+      const my = y + sepY + n._attrCount * 18 + (n._hasSep ? 16 : 0) + mi * 18;
+      g.appendChild(el('text', {
+        x: x + 12, y: my, class: 'node-member'
+      }, m));
+      methIdx++;
+    }
+  }
 }
 
 /* ---------------- 内容构建 ---------------- */
@@ -2279,11 +2698,16 @@ enum OrderStatus {
   SHIPPED
 }
 
+notice 用户操作{
+  用户可能退款
+}
+
 User "1" --> "*" Order : 下单
 Order "1" *-- "1..*" OrderItem : 包含
 Order ..|> Payable : 实现
 User --|> BaseEntity : 继承
 Order --> OrderStatus : 状态
+用户操作 ..> OrderStatus--Order:用户退款
 `,
 
   '用例图 · 图书馆': `@diagram usecase "图书馆管理系统用例图"
@@ -2369,9 +2793,14 @@ entity 商品 {
   stock: INT
 }
 
+database Data{
+  磁盘存储
+}
+
 用户 ||--o{ 订单 : "下单"
 订单 ||--|{ 订单项 : "包含"
 商品 ||--o{ 订单项 : "被购买"
+订单项 --> Data : 存储信息
 `,
 
   '时序图 · 登录流程': `@diagram sequence "用户登录时序图"
@@ -2511,8 +2940,7 @@ package 数据层 {
 
 表现层 ..> 业务层 : 调用
 业务层 ..> 数据层 : 调用
-`
-};
+`};
 
 const sampleSelect = document.getElementById('samples');
 const ph = document.createElement('option');
