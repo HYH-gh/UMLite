@@ -1289,6 +1289,8 @@ function prepareNodes(model) {
     n.w = Math.max(w, 124);
     const extraH = n._hasSep ? 16 : 0; // 分隔线额外高度
     n.h = mems.length ? 34 + mems.length * 18 + extraH + 8 : 44;
+    // 部署图 node 的 3D 立体效果：碰撞区域扩大 8px 以匹配视觉大小
+    if (n.kind === 'node') { n.w += 8; n.h += 8; }
   }
 }
 
@@ -1893,32 +1895,36 @@ function drawNode(g, n, type) {
   /********** 部署图 node - 3D 立体盒子 **********/
   if (n.kind === 'node') {
     const dep = 8; // 3D 深度
-    // 侧面
+    const fw = n.w - dep; // 正面宽度（碰撞区域包含 3D 深度）
+    const fh = n.h - dep; // 正面高度
+    // 顶面（上侧平行四边形）
     g.appendChild(el('polygon', {
-      points: `${x + dep},${y + dep} ${x + n.w + dep},${y + dep} ${x + n.w},${y} ${x},${y}`,
+      points: `${x + dep},${y + dep} ${x + n.w},${y + dep} ${x + fw},${y} ${x},${y}`,
       fill: '#d1fae5', stroke: '#10b981', 'stroke-width': 1
     }));
+    // 右面（右侧平行四边形）
     g.appendChild(el('polygon', {
-      points: `${x + n.w},${y} ${x + n.w + dep},${y + dep} ${x + n.w + dep},${y + n.h + dep} ${x + n.w},${y + n.h}`,
+      points: `${x + fw},${y} ${x + n.w},${y + dep} ${x + n.w},${y + n.h} ${x + fw},${y + fh}`,
       fill: '#a7f3d0', stroke: '#10b981', 'stroke-width': 1
     }));
-    // 底部面（3D 延伸到底部的平行四边形，在正面之前绘制以获得正确层叠）
+    // 底部面（底部平行四边形）
     g.appendChild(el('polygon', {
-      points: `${x},${y + n.h} ${x + n.w},${y + n.h} ${x + n.w + dep},${y + n.h + dep} ${x + dep},${y + n.h + dep}`,
+      points: `${x},${y + fh} ${x + fw},${y + fh} ${x + n.w},${y + n.h} ${x + dep},${y + n.h}`,
       fill: '#d1fae5', stroke: '#10b981', 'stroke-width': 1
     }));
+    // 正面（主矩形）
     g.appendChild(el('polygon', {
-      points: `${x},${y} ${x + n.w},${y} ${x + n.w},${y + n.h} ${x},${y + n.h}`,
+      points: `${x},${y} ${x + fw},${y} ${x + fw},${y + fh} ${x},${y + fh}`,
       fill: '#ecfdf5', stroke: '#10b981', 'stroke-width': 1.5
     }));
     // 标题行
     const headH = 30;
     g.appendChild(el('line', {
-      x1: x, y1: y + headH, x2: x + n.w, y2: y + headH,
+      x1: x, y1: y + headH, x2: x + fw, y2: y + headH,
       stroke: '#10b981', 'stroke-width': 1
     }));
     g.appendChild(el('text', {
-      x: n.x, y: y + headH - 9, 'text-anchor': 'middle', class: 'node-title-sm',
+      x: n.x - dep / 2, y: y + headH - 9, 'text-anchor': 'middle', class: 'node-title-sm',
       fill: '#065f46'
     }, `«node» ${n.label}`));
     (n.members || []).forEach((m, i) => {
