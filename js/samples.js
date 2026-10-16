@@ -51,7 +51,7 @@ Order --> OrderStatus : 状态
 
   '用例图 · 图书馆': `@diagram usecase "图书馆管理系统用例图"
 
-boundary "图书管理系统"
+boundary "图书管理系统" :solid
 
 actor 读者
 actor 管理员

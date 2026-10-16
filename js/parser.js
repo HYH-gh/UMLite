@@ -148,9 +148,9 @@ function parseClassLike(lines, type) {
     if (text === '}') { i++; continue; }
 
     // boundary 关键字（用例图系统边界）
-    const bm = text.match(/^boundary\s+"([^"]+)"\s*$/i);
+    const bm = text.match(/^boundary\s+"([^"]+)"\s*(?::\s*(solid|dashed))?\s*$/i);
     if (bm) {
-      boundary = { label: bm[1] };
+      boundary = { label: bm[1], lineStyle: bm[2] ? bm[2].toLowerCase() : 'dashed' };
       i++;
       continue;
     }

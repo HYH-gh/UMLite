@@ -551,9 +551,10 @@ function buildGraphContent(model) {
   // 绘制用例图系统边界框
   if (model.type === 'usecase' && model.boundary) {
     const b = model.boundary;
+    const dash = b.lineStyle === 'solid' ? 'none' : '8 4';
     root.appendChild(el('rect', {
       x: b.x, y: b.y, width: b.w, height: b.h, rx: 10,
-      fill: '#f4f6ff', stroke: '#6366f1', 'stroke-width': 1.5, 'stroke-dasharray': '8 4'
+      fill: '#f4f6ff', stroke: '#6366f1', 'stroke-width': 1.5, 'stroke-dasharray': dash
     }));
     const lblW = textWidth(b.label, 13, '600') + 20;
     root.appendChild(el('rect', {
@@ -564,6 +565,22 @@ function buildGraphContent(model) {
       x: b.x + 24, y: b.y + 4,
       class: 'node-title-sm', fill: '#4338ca'
     }, b.label));
+
+    // 四角大小调整命中区（透明不可见，鼠标移至边界四角处可拖拽调整大小）
+    const HS = 18;
+    const corners = [
+      ['nw', b.x,            b.y,            'nwse-resize'],
+      ['ne', b.x + b.w,      b.y,            'nesw-resize'],
+      ['sw', b.x,            b.y + b.h,      'nesw-resize'],
+      ['se', b.x + b.w,      b.y + b.h,      'nwse-resize']
+    ];
+    for (const [corner, cx, cy, cur] of corners) {
+      root.appendChild(el('rect', {
+        x: cx - HS / 2, y: cy - HS / 2, width: HS, height: HS, rx: 3,
+        fill: 'rgba(0,0,0,0)', 'pointer-events': 'all',
+        'data-boundary-handle': corner, cursor: cur
+      }));
+    }
   }
 
   const gEdges = el('g');

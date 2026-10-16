@@ -175,14 +175,16 @@ User --> Order
 ### 4.1 语法
 
 ```
-boundary "系统名称"
+boundary "系统名称" [:solid | :dashed]
 usecase <用例名> [:boundary]
 actor <角色名>
 <角色> --> <用例>
 <用例> ..> <用例> : «include» | «extend»
 ```
 
-- `boundary` 声明系统边界框（可选的），系统名称显示在虚线矩形的左上角。
+- `boundary` 声明系统边界框（可选的），系统名称显示在矩形框的左上角。
+  - 线型默认**虚线**；在末尾追加 `:solid` 可改为**实线**，追加 `:dashed` 则显式指定**虚线**。
+  - 边界框的**四角**可用于拖拽，实时调整边界大小。
 - `usecase` 后加 `:boundary` 后缀标记此用例属于系统内部，会被包裹在边界框内。
 - 未加 `:boundary` 的 `usecase` 和所有 `actor` 默认渲染在边界框**外部**。
 - 角色与用例之间常用 `-->`（关联）。
@@ -193,7 +195,7 @@ actor <角色名>
 ```
 @diagram usecase "图书馆管理系统用例图"
 
-boundary "图书管理系统"
+boundary "图书管理系统" :solid
 
 actor 读者
 actor 管理员

@@ -9,6 +9,7 @@ let viewportEl = null;
 let _vbW = 800, _vbH = 600;
 let dragState = null;
 let panState = null;
+let resizeState = null;
 let paintQueued = false;
 
 const preview = document.getElementById('preview');
@@ -72,6 +73,10 @@ function paint() {
     elm.addEventListener('pointerdown', onNodePointerDown);
   });
 
+  viewportEl.querySelectorAll('[data-boundary-handle]').forEach(elm => {
+    elm.addEventListener('pointerdown', onBoundaryHandlePointerDown);
+  });
+
   updateZoomInfo();
 }
 
@@ -133,7 +138,57 @@ function onCanvasPointerDown(evt) {
   document.body.style.cursor = 'grabbing';
 }
 
+/* ---------------- 用例图边界框大小调整 ---------------- */
+
+const BOUNDARY_MIN = 60;
+
+function onBoundaryHandlePointerDown(evt) {
+  if (evt.button !== 0) return;
+  const corner = evt.currentTarget.getAttribute('data-boundary-handle');
+  if (!currentModel || !currentModel.boundary) return;
+
+  evt.stopPropagation();
+  evt.preventDefault();
+
+  const p = clientToBase(evt.clientX, evt.clientY);
+  const b = currentModel.boundary;
+  resizeState = {
+    corner,
+    bx0: b.x, by0: b.y, bw0: b.w, bh0: b.h,
+    startX: p.x, startY: p.y
+  };
+  document.body.style.cursor = evt.currentTarget.getAttribute('cursor') || 'nwse-resize';
+}
+
+function onPointerMoveResize(evt) {
+  const p = clientToBase(evt.clientX, evt.clientY);
+  const s = resizeState;
+  const b = currentModel.boundary;
+  const dx = p.x - s.startX;
+  const dy = p.y - s.startY;
+
+  let x = s.bx0, y = s.by0, w = s.bw0, h = s.bh0;
+  if (s.corner.includes('e')) w = Math.max(BOUNDARY_MIN, s.bw0 + dx);
+  if (s.corner.includes('s')) h = Math.max(BOUNDARY_MIN, s.bh0 + dy);
+  if (s.corner.includes('w')) {
+    w = Math.max(BOUNDARY_MIN, s.bw0 - dx);
+    x = s.bx0 + (s.bw0 - w);
+  }
+  if (s.corner.includes('n')) {
+    h = Math.max(BOUNDARY_MIN, s.bh0 - dy);
+    y = s.by0 + (s.bh0 - h);
+  }
+
+  b.x = x; b.y = y; b.w = w; b.h = h;
+  schedulePaint();
+  evt.preventDefault();
+}
+
 document.addEventListener('pointermove', (evt) => {
+  if (resizeState) {
+    onPointerMoveResize(evt);
+    return;
+  }
   if (dragState) {
     const p = clientToBase(evt.clientX, evt.clientY);
     dragState.node.x = p.x + dragState.offsetX;
@@ -157,9 +212,10 @@ document.addEventListener('pointermove', (evt) => {
 document.addEventListener('pointerup', () => {
   if (dragState) { dragState = null; document.body.style.cursor = ''; }
   if (panState) { panState = null; document.body.style.cursor = ''; }
+  if (resizeState) { resizeState = null; document.body.style.cursor = ''; }
 });
 document.addEventListener('pointercancel', () => {
-  dragState = null; panState = null; document.body.style.cursor = '';
+  dragState = null; panState = null; resizeState = null; document.body.style.cursor = '';
 });
 
 preview.addEventListener('wheel', (evt) => {
