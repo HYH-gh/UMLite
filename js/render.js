@@ -101,14 +101,27 @@ function drawEdgeLabel(g, x, y, text) {
   g.appendChild(el('text', { x, y: y + 1, 'text-anchor': 'middle', class: 'edge-label' }, text));
 }
 
-function drawEdge(g, e, nodeMap) {
+function drawEdge(g, e, nodeMap, edges) {
   // 连线中点引用：notice ..> A--B 指向已有连线的中点
   if (e.connectToMidpoint) {
     const refA = nodeMap.get(e.connectToMidpoint.from);
     const refB = nodeMap.get(e.connectToMidpoint.to);
     if (!refA || !refB) return;
-    const mx = (refA.x + refB.x) / 2, my = (refA.y + refB.y) / 2;
-    const mp = { x: mx, y: my };
+    // 默认保持原逻辑：指向两元素中心连线的中点；
+    // 仅当被指向的线添加了折点（变成折线）时，才改指向其标签位置，避免落入空白
+    let mp;
+    // 端点方向可能相反（如 A--B 与 B-->A 都表示同一条线），须双向匹配
+    const te = edges ? edges.find(x =>
+      (x.from === e.connectToMidpoint.from && x.to === e.connectToMidpoint.to) ||
+      (x.from === e.connectToMidpoint.to && x.to === e.connectToMidpoint.from)
+    ) : null;
+    const tb = te && te.bends && te.bends.length ? te.bends.filter(pt => isFinite(pt.x) && isFinite(pt.y)) : null;
+    if (tb && tb.length) {
+      const p1t = clipPoint(refA, tb[0].x, tb[0].y);
+      mp = { x: (p1t.x + tb[0].x) / 2, y: (p1t.y + tb[0].y) / 2 - 8 };
+    } else {
+      mp = { x: (refA.x + refB.x) / 2, y: (refA.y + refB.y) / 2 };
+    }
     let src, dst;
     if (e.from) {
       src = nodeMap.get(e.from);
@@ -147,30 +160,50 @@ function drawEdge(g, e, nodeMap) {
     return;
   }
 
-  const p1 = clipPoint(a, b.x, b.y);
-  const p2 = clipPoint(b, a.x, a.y);
-  const ang = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+  const bends = (e.bends && e.bends.length) ? e.bends.filter(pt => isFinite(pt.x) && isFinite(pt.y)) : null;
+  let p1, p2;
+  if (bends) {
+    p1 = clipPoint(a, bends[0].x, bends[0].y);
+    p2 = clipPoint(b, bends[bends.length - 1].x, bends[bends.length - 1].y);
+  } else {
+    p1 = clipPoint(a, b.x, b.y);
+    p2 = clipPoint(b, a.x, a.y);
+  }
+  const pts = bends ? [p1].concat(bends, [p2]) : [p1, p2];
 
-  g.appendChild(el('line', {
-    x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y,
-    class: 'edge-line' + (e.dash ? ' edge-dashed' : '')
-  }));
+  if (bends) {
+    const pointsStr = pts.map(pt => `${pt.x},${pt.y}`).join(' ');
+    g.appendChild(el('polyline', { points: pointsStr, class: 'edge-line' + (e.dash ? ' edge-dashed' : '') }));
+  } else {
+    g.appendChild(el('line', {
+      x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y,
+      class: 'edge-line' + (e.dash ? ' edge-dashed' : '')
+    }));
+  }
 
-  if (e.head && e.head !== 'none') addArrowHead(g, p2, ang, e.head);
-  if (e.tailDiamond) addDiamond(g, p1, ang, e.tailDiamond === 'filled');
+  const endSegA = pts[pts.length - 2], endSegB = pts[pts.length - 1];
+  const angEnd = Math.atan2(endSegB.y - endSegA.y, endSegB.x - endSegA.x);
+  const startSegA = pts[0], startSegB = pts[1];
+  const angStart = Math.atan2(startSegB.y - startSegA.y, startSegB.x - startSegA.x);
 
-  const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
-  if (e.label) drawEdgeLabel(g, mx, my - 8, e.label);
+  if (e.head && e.head !== 'none') addArrowHead(g, p2, angEnd, e.head);
+  if (e.tailDiamond) addDiamond(g, p1, angStart, e.tailDiamond === 'filled');
 
   if (e.fromMult) {
-    const t = 0.18;
-    const x = p1.x + (p2.x - p1.x) * t, y = p1.y + (p2.y - p1.y) * t;
+    const x = startSegA.x + (startSegB.x - startSegA.x) * 0.18, y = startSegA.y + (startSegB.y - startSegA.y) * 0.18;
     g.appendChild(el('text', { x: x + 6, y: y - 6, class: 'mult-text' }, e.fromMult));
   }
   if (e.toMult) {
-    const t = 0.82;
-    const x = p1.x + (p2.x - p1.x) * t, y = p1.y + (p2.y - p1.y) * t;
+    const x = endSegA.x + (endSegB.x - endSegA.x) * 0.82, y = endSegA.y + (endSegB.y - endSegA.y) * 0.82;
     g.appendChild(el('text', { x: x - 6, y: y - 6, class: 'mult-text', 'text-anchor': 'end' }, e.toMult));
+  }
+
+  if (e.label) {
+    if (bends) {
+      drawEdgeLabel(g, (p1.x + pts[1].x) / 2, (p1.y + pts[1].y) / 2 - 8, e.label);
+    } else {
+      drawEdgeLabel(g, (p1.x + p2.x) / 2, (p1.y + p2.y) / 2 - 8, e.label);
+    }
   }
 }
 
@@ -588,7 +621,22 @@ function buildGraphContent(model) {
   root.appendChild(gEdges);
   root.appendChild(gNodes);
 
-  for (const e of model.edges) drawEdge(gEdges, e, nodeMap);
+  for (let i = 0; i < model.edges.length; i++) {
+    const e = model.edges[i];
+    drawEdge(gEdges, e, nodeMap, model.edges);
+    // 折点命中区（透明不可见，用于拖动/删除折点）
+    if (e.bends && e.bends.length) {
+      for (let k = 0; k < e.bends.length; k++) {
+        const bk = e.bends[k];
+        if (!isFinite(bk.x) || !isFinite(bk.y)) continue;
+        gEdges.appendChild(el('rect', {
+          x: bk.x - 6, y: bk.y - 6, width: 12, height: 12,
+          fill: 'rgba(0,0,0,0)', 'pointer-events': 'all',
+          'data-bend-edge': i, 'data-bend-idx': k, cursor: 'move'
+        }));
+      }
+    }
+  }
 
   for (const n of model.nodes) {
     const gn = el('g', { 'data-node-id': n.id });
