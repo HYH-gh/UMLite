@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿/* ==========================================================================
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ==========================================================================
  *  布局层
  * ========================================================================== */
 
@@ -81,6 +81,58 @@ function prepareNodes(model) {
 
 /* -------- 力导向布局 -------- */
 
+/* 基于连通分量的初始布点：各连通分量平铺成团，分量内按度数分层环绕，
+   使有边的节点彼此靠近，减少长距连线的交织。 */
+function initForcePositions(nodes, edges, W, H) {
+  const n = nodes.length;
+  const idx = new Map();
+  nodes.forEach((nd, i) => idx.set(nd.id, i));
+  const adj = nodes.map(() => []);
+  for (const e of edges) {
+    const a = idx.get(e.from), b = idx.get(e.to);
+    if (a === undefined || b === undefined || a === b) continue;
+    adj[a].push(b); adj[b].push(a);
+  }
+  const visited = new Array(n).fill(false);
+  const comps = [];
+  for (let i = 0; i < n; i++) {
+    if (visited[i]) continue;
+    const comp = [];
+    const stk = [i]; visited[i] = true;
+    while (stk.length) {
+      const v = stk.pop(); comp.push(v);
+      for (const u of adj[v]) if (!visited[u]) { visited[u] = true; stk.push(u); }
+    }
+    comps.push(comp);
+  }
+  comps.sort((a, b) => b.length - a.length);
+  const cols = Math.ceil(Math.sqrt(Math.max(comps.length, 1)));
+  const rows = Math.ceil(comps.length / cols);
+  const margin = 90;
+  const availW = Math.max(W - margin * 2, 10), availH = Math.max(H - margin * 2, 10);
+  comps.forEach((comp, ci) => {
+    const cx = margin + (ci % cols + 0.5) * (availW / cols);
+    const cy = margin + (Math.floor(ci / cols) + 0.5) * (availH / rows);
+    const m = comp.length;
+    if (m === 1) { nodes[comp[0]].x = cx; nodes[comp[0]].y = cy; return; }
+    // 分量内：按度数分层环绕（高度数的靠内，边短的聚拢）
+    const inner = Math.max(1, Math.min(Math.ceil(Math.sqrt(m)), m));
+    const innerCount = Math.min(inner, m);
+    const outerCount = m - innerCount;
+    comp.map(v => ({ v, d: adj[v].length }))
+      .sort((a, b) => b.d - a.d)
+      .forEach((o, k) => {
+        const isInner = k < innerCount;
+        const kk = isInner ? k : k - innerCount;
+        const cnt = isInner ? innerCount : outerCount;
+        const ang = (kk / (cnt || 1)) * Math.PI * 2 + (isInner ? 0 : Math.PI / (innerCount || 1));
+        const r = isInner ? Math.sqrt(m) * 16 : Math.sqrt(m) * 42;
+        nodes[o.v].x = cx + Math.cos(ang) * r;
+        nodes[o.v].y = cy + Math.sin(ang) * r;
+      });
+  });
+}
+
 function layoutForce(model) {
   const nodes = model.nodes;
   const n = nodes.length;
@@ -88,12 +140,7 @@ function layoutForce(model) {
   const W = Math.max(760, Math.sqrt(n) * 260);
   const H = Math.max(520, Math.sqrt(n) * 200);
 
-  nodes.forEach((nd, i) => {
-    const ang = (i / n) * Math.PI * 2;
-    const r = Math.min(W, H) * 0.30;
-    nd.x = W / 2 + Math.cos(ang) * r * (0.65 + Math.random() * 0.35);
-    nd.y = H / 2 + Math.sin(ang) * r * (0.65 + Math.random() * 0.35);
-  });
+  initForcePositions(nodes, model.edges, W, H);
 
   const idOf = new Map(nodes.map((nd, i) => [nd.id, i]));
   const links = model.edges
@@ -159,7 +206,36 @@ function layoutForce(model) {
     temp *= 0.992;
   }
 
-  resolveOverlaps(nodes);
+  // 类图：多轮「正交化对齐 + 消除重叠」交替，使尽量多的线横平竖直
+  if (model.type === 'class' || model.type === 'deployment') {
+    for (let k = 0; k < 4; k++) {
+      orthogonalize(nodes, links, 80);
+      resolveOverlaps(nodes, 48, 42);
+    }
+  } else {
+    resolveOverlaps(nodes);
+  }
+}
+
+/* 正交化：对每一条边，按其当前朝向把两端往「水平中线」或「垂直中线」微拉，
+   使连线逐渐趋近横平竖直。配合 resolveOverlaps 交替执行可保持不重叠。 */
+function orthogonalize(nodes, links, iters) {
+  for (let it = 0; it < iters; it++) {
+    let active = false;
+    for (const l of links) {
+      const A = nodes[l.a], B = nodes[l.b];
+      const dx = Math.abs(B.x - A.x), dy = Math.abs(B.y - A.y);
+      if (dx < 1 && dy < 1) continue;
+      if (dx >= dy) {
+        const m = (A.y + B.y) / 2;
+        if (Math.abs(m - A.y) > 0.01) { A.y += (m - A.y) * 0.24; B.y += (m - B.y) * 0.24; active = true; }
+      } else {
+        const m = (A.x + B.x) / 2;
+        if (Math.abs(m - A.x) > 0.01) { A.x += (m - A.x) * 0.24; B.x += (m - B.x) * 0.24; active = true; }
+      }
+    }
+    if (!active) break;
+  }
 }
 
 function resolveOverlaps(nodes, gapX = 30, gapY = 26) {
@@ -184,6 +260,30 @@ function resolveOverlaps(nodes, gapX = 30, gapY = 26) {
       }
     }
     if (!moved) break;
+  }
+}
+
+/* Barycenter 层间排序：按所有有边邻居的居中位置重排本层，减少连线交叉。
+   邻居不限于相邻层，跨层长边也参与，进一步降低长线交织。 */
+function barycenterSort(layers, edges) {
+  if (layers.length < 2) return;
+  const posOf = new Map();
+  layers.forEach((ly, d) => ly.forEach((n, i) => posOf.set(n.id, i)));
+  for (let pass = 0; pass < 10; pass++) {
+    for (let d = 1; d < layers.length; d++) {
+      const ly = layers[d];
+      const ev = ly.map((n, i) => {
+        let sum = 0, cnt = 0;
+        for (const e of edges) {
+          if (e.to === n.id) { const p = posOf.get(e.from); if (p !== undefined) { sum += p; cnt++; } }
+          if (e.from === n.id) { const p = posOf.get(e.to); if (p !== undefined) { sum += p; cnt++; } }
+        }
+        return { n, bc: cnt ? sum / cnt : i, old: i };
+      });
+      ev.sort((a, b) => a.bc - b.bc || a.old - b.old);
+      layers[d] = ev.map(x => x.n);
+      layers[d].forEach((n, i) => posOf.set(n.id, i));
+    }
   }
 }
 
@@ -223,7 +323,10 @@ function layoutActivity(model) {
     layers[d].push(n);
   }
 
-  const VGAP = 54, HGAP = 46;
+  // 层内排序：Barycenter 启发式，多轮迭代降低层间连线交叉
+  barycenterSort(layers, edges);
+
+  const VGAP = 60, HGAP = 52;
   let y = 40;
   for (let d = 0; d < layers.length; d++) {
     const layer = layers[d] || [];
@@ -383,9 +486,9 @@ function normalizeUsecaseBoundary(model) {
   const boundNodes = nodes.filter(n => n.insideBoundary);
   const outsideNodes = nodes.filter(n => !n.insideBoundary);
 
-  const BPAD = 48;           // 边界框内部留白
-  const PAD = 36 + BPAD;     // 内容区边距
-  const TOP_PAD = (title ? 70 : 36) + 44;
+  const BPAD = 64;           // 边界框内部留白（放大，给元素更多呼吸空间）
+  const PAD = 40 + BPAD;     // 内容区边距
+  const TOP_PAD = (title ? 78 : 46) + 44;
 
   // ── 1. 计算框内元素的包围盒并偏移 ──
   if (boundNodes.length) {

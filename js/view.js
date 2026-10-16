@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿/* ==========================================================================
+﻿﻿﻿﻿﻿﻿﻿﻿/* ==========================================================================
  *  视图状态 & 绘制
  * ========================================================================== */
 
@@ -481,15 +481,18 @@ function render() {
       model.contentW = dims.width;
       model.contentH = dims.height;
     } else {
-      if (model.type === 'activity') {
+      if (model.type === 'activity' || model.type === 'state') {
         layoutActivity(model);
-        resolveOverlaps(model.nodes, 44, 36);
+        resolveOverlaps(model.nodes, model.type === 'activity' ? 44 : 42,
+          model.type === 'activity' ? 36 : 32);
       } else if (model.type === 'usecase' && model.boundary) {
         // 用例图含系统边界：仅对框内元素做力导向布局
         const insideNodes = model.nodes.filter(n => n.insideBoundary);
         if (insideNodes.length) {
           const subModel = { ...model, nodes: insideNodes };
           layoutForce(subModel);
+          // 二次更强的消除重叠，保证框内元素互不遮挡
+          resolveOverlaps(subModel.nodes, 64, 52);
         }
         // 框外元素在 normalizeToOrigin 中统一放置
       } else {
