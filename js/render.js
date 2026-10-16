@@ -1,4 +1,4 @@
-﻿/* ==========================================================================
+﻿﻿﻿/* ==========================================================================
  *  渲染层
  * ========================================================================== */
 
@@ -17,6 +17,13 @@ const SVG_CSS = `
 .act-round{fill:#ecfeff;stroke:#0891b2;stroke-width:1.6;rx:22;}
 .act-diamond{fill:#fef3c7;stroke:#d97706;stroke-width:1.6;}
 .act-start{fill:#0f172a;stroke:#0f172a;stroke-width:1.6;}
+.swimlane-h{fill:rgba(224,242,254,0.4);stroke:none;}
+.swimlane-v{fill:rgba(236,253,245,0.45);stroke:none;}
+.swimlane-bar-h{fill:rgba(14,165,233,0.55);}
+.swimlane-bar-v{fill:rgba(16,185,129,0.55);}
+.swimlane-sep-h{stroke:#0ea5e9;stroke-width:2;}
+.swimlane-sep-v{stroke:#10b981;stroke-width:2;}
+.swimlane-title{font-family:${FONT};font-size:15px;font-weight:700;fill:#0369a1;letter-spacing:1px;}
 .act-stop{fill:#ffffff;stroke:#0f172a;stroke-width:2.4;}
 .act-text{font-family:${FONT};font-size:13px;fill:#0f172a;}
 .act-text-sm{font-family:${FONT};font-size:11.5px;fill:#78350f;}
@@ -577,6 +584,114 @@ function drawNode(g, n, type) {
 
 /* ---------------- 内容构建 ---------------- */
 
+/* 活动图容器：泳道（最底层色带，可移动）+ 活动边（实线方框） */
+function renderActivityContainers(root, model) {
+  const HS = 18;
+  // 泳道：渲染在底层
+  if (model.swimlanes) {
+    model.swimlanes.forEach((s, idx) => {
+      const box = el('g', { 'data-swimlane-idx': idx });
+      const isV = s.dir === 'v';
+      // 条带底色（无整体描边，开口端无框，侧边边框单独绘制）
+      box.appendChild(el('rect', {
+        x: s.x, y: s.y, width: s.w, height: s.h,
+        class: isV ? 'swimlane-v' : 'swimlane-h',
+        'data-swimlane-body': idx
+      }));
+      if (isV) {
+        // 垂直泳道：顶部标题栏（标题居中横排），左右侧边竖线保留，底部开口（无底边框）
+        const barH = Math.min(30, s.h * 0.5);
+        box.appendChild(el('rect', {
+          x: s.x, y: s.y, width: s.w, height: barH, class: 'swimlane-bar-v'
+        }));
+        // 标题栏封闭：顶线 + 底部分隔线
+        box.appendChild(el('line', {
+          x1: s.x, y1: s.y, x2: s.x + s.w, y2: s.y, class: 'swimlane-sep-v'
+        }));
+        box.appendChild(el('line', {
+          x1: s.x, y1: s.y + barH, x2: s.x + s.w, y2: s.y + barH, class: 'swimlane-sep-v'
+        }));
+        // 左右侧边竖线（保留，贯穿整条泳道）
+        box.appendChild(el('line', {
+          x1: s.x, y1: s.y, x2: s.x, y2: s.y + s.h, class: 'swimlane-sep-v'
+        }));
+        box.appendChild(el('line', {
+          x1: s.x + s.w, y1: s.y, x2: s.x + s.w, y2: s.y + s.h, class: 'swimlane-sep-v'
+        }));
+        box.appendChild(el('text', {
+          x: s.x + s.w / 2, y: s.y + barH - 8, class: 'swimlane-title', 'text-anchor': 'middle'
+        }, s.label));
+      } else {
+        // 水平泳道：左侧标题栏（标题竖排居中），上下侧边横线保留，向右开口（无右边框）
+        const barW = Math.min(46, s.w * 0.35);
+        box.appendChild(el('rect', {
+          x: s.x, y: s.y, width: barW, height: s.h, class: 'swimlane-bar-h'
+        }));
+        // 标题栏封闭：左边线 + 右侧分隔线
+        box.appendChild(el('line', {
+          x1: s.x, y1: s.y, x2: s.x, y2: s.y + s.h, class: 'swimlane-sep-h'
+        }));
+        box.appendChild(el('line', {
+          x1: s.x + barW, y1: s.y, x2: s.x + barW, y2: s.y + s.h, class: 'swimlane-sep-h'
+        }));
+        // 上下侧边横线（保留，贯穿整条泳道）
+        box.appendChild(el('line', {
+          x1: s.x, y1: s.y, x2: s.x + s.w, y2: s.y, class: 'swimlane-sep-h'
+        }));
+        box.appendChild(el('line', {
+          x1: s.x, y1: s.y + s.h, x2: s.x + s.w, y2: s.y + s.h, class: 'swimlane-sep-h'
+        }));
+        // 标题竖排（左栏垂直居中）
+        const tc = s.x + barW / 2, tm = s.y + s.h / 2;
+        box.appendChild(el('text', {
+          x: tc, y: tm, class: 'swimlane-title', 'text-anchor': 'middle',
+          transform: `rotate(-90 ${tc} ${tm})`
+        }, s.label));
+      }
+      addContainerHandles(box, 'swimlane', idx, s);
+      root.appendChild(box);
+    });
+  }
+  // 活动边：实线圆角边框 + 左上标签
+  if (model.activityEdge) {
+    const a = model.activityEdge;
+    const box = el('g');
+    box.appendChild(el('rect', {
+      x: a.x, y: a.y, width: a.w, height: a.h, rx: 10,
+      fill: 'rgba(248,250,255,0.55)', stroke: '#4f46e5',
+      'stroke-width': 1.5, 'stroke-dasharray': 'none'
+    }));
+    const lblW = textWidth(a.label, 13, '600') + 24;
+    box.appendChild(el('rect', {
+      x: a.x + 14, y: a.y - 11, width: lblW, height: 22, rx: 4,
+      fill: '#f8faff', stroke: 'none'
+    }));
+    box.appendChild(el('text', {
+      x: a.x + 26, y: a.y + 4, class: 'node-title-sm', fill: '#4338ca'
+    }, a.label));
+    addContainerHandles(box, 'activityEdge', -1, a);
+    root.appendChild(box);
+  }
+}
+
+/* 容器四角大小调整命中区（透明不可见，拖拽四角调整大小） */
+function addContainerHandles(box, ctype, cidx, obj) {
+  const HS = 18;
+  const corners = [
+    ['nw', obj.x,            obj.y,              'nwse-resize'],
+    ['ne', obj.x + obj.w,    obj.y,              'nesw-resize'],
+    ['sw', obj.x,            obj.y + obj.h,      'nesw-resize'],
+    ['se', obj.x + obj.w,    obj.y + obj.h,      'nwse-resize']
+  ];
+  for (const [corner, cx, cy, cur] of corners) {
+    box.appendChild(el('rect', {
+      x: cx - HS / 2, y: cy - HS / 2, width: HS, height: HS, rx: 3,
+      fill: 'rgba(0,0,0,0)', 'pointer-events': 'all',
+      'data-ctype': ctype, 'data-cidx': cidx, 'data-corner': corner, cursor: cur
+    }));
+  }
+}
+
 function buildGraphContent(model) {
   const root = el('g');
   const nodeMap = new Map(model.nodes.map(n => [n.id, n]));
@@ -614,6 +729,11 @@ function buildGraphContent(model) {
         'data-boundary-handle': corner, cursor: cur
       }));
     }
+  }
+
+  // 活动图容器：泳道（渲染在最底层）+ 活动边
+  if (model.type === 'activity' && (model.activityEdge || (model.swimlanes && model.swimlanes.length))) {
+    renderActivityContainers(root, model);
   }
 
   const gEdges = el('g');

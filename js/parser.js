@@ -1,4 +1,4 @@
-﻿/* ---------------- 解析层 ---------------- */
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ---------------- 解析层 ---------------- */
 
 const DIAGRAM_ALIASES = {
   class: 'class', classdiagram: 'class', '类图': 'class',
@@ -244,6 +244,9 @@ function parseClassLike(lines, type) {
 function parseActivity(lines) {
   const nodes = [];
   const edges = [];
+  let activityEdge = null;
+  const swimlanes = [];
+  let currentLane = null; // 当前泳道（元素归入泳道的游标）
   let counter = 0;
   const nid = (p) => `${p}_${++counter}`;
   let prev = [];
@@ -257,28 +260,53 @@ function parseActivity(lines) {
     }
   };
 
-  for (const { text, no } of lines) {
+  for (const { text: rawText, no } of lines) {
     let m;
+    let text = rawText;
     const lbl = pendingLabel; pendingLabel = null;
+
+    // 泳道归属：行尾  in "泳道名"  把该元素归入对应泳道；缺省沿用当前泳道
+    let lane = currentLane;
+    const inM = text.match(/\s+in\s+"([^"]*)"\s*$/);
+    if (inM) {
+      lane = inM[1];
+      text = text.slice(0, inM.index).replace(/\s+$/, '');
+    }
+    currentLane = lane;
+
+    // 活动边（实线方框，替代用例图 boundary：关键字 boundary，固定实线）
+    const cbm = text.match(/^boundary\s+"([^"]+)"\s*$/i);
+    if (cbm) {
+      activityEdge = { label: cbm[1] };
+      continue;
+    }
+
+    // 泳道：默认水平(:h)，可用 :h / :v / :horizontal / :vertical 指定开口方向
+    const swm = text.match(/^swimlane\s+"([^"]+)"(?:\s*[:：]?\s*(h|horizontal|v|vertical|null|none))?\s*$/i);
+    if (swm) {
+      const dir = (swm[2] || 'h')[0].toLowerCase();
+      swimlanes.push({ label: swm[1], dir: dir === 'v' ? 'v' : 'h' });
+      continue;
+    }
 
     if (text === 'start') {
       const id = nid('start');
-      nodes.push({ id, kind: 'start', label: '' });
+      nodes.push({ id, kind: 'start', label: '', lane });
       link(prev, id, lbl); prev = [id];
 
     } else if (text === 'stop' || text === 'end' || text === 'end.') {
       const id = nid('stop');
-      nodes.push({ id, kind: 'stop', label: '' });
+      nodes.push({ id, kind: 'stop', label: '', lane });
       link(prev, id, lbl); prev = [id];
 
     } else if ((m = text.match(/^:(.*?);?\s*$/))) {
       const id = nid('act');
-      nodes.push({ id, kind: 'action', label: m[1].trim() });
+      nodes.push({ id, kind: 'action', label: m[1].trim(), lane });
       link(prev, id, lbl); prev = [id];
 
     } else if ((m = text.match(/^if\s*[（(]?(.*?)[)）]?\s*$/))) {
       const id = nid('dec');
-      nodes.push({ id, kind: 'decision', label: m[1].trim() });
+      nodes.push({ id, kind: 'decision', label: m[1].trim(), lane });
       link(prev, id, lbl);
       stack.push({ type: 'if', dec: id, thenEnds: null });
       prev = [id]; pendingLabel = '是';
@@ -299,7 +327,7 @@ function parseActivity(lines) {
 
     } else if ((m = text.match(/^while\s*[（(]?(.*?)[)）]?\s*$/))) {
       const id = nid('dec');
-      nodes.push({ id, kind: 'decision', label: m[1].trim(), isLoop: true });
+      nodes.push({ id, kind: 'decision', label: m[1].trim(), isLoop: true, lane });
       link(prev, id, lbl);
       stack.push({ type: 'while', dec: id });
       prev = [id]; pendingLabel = '是';
@@ -312,18 +340,18 @@ function parseActivity(lines) {
 
     } else if ((m = text.match(/^note\s*[:：]?\s*(.*)$/))) {
       const id = nid('note');
-      nodes.push({ id, kind: 'note', label: m[1].trim() });
+      nodes.push({ id, kind: 'note', label: m[1].trim(), lane });
       link(prev, id, lbl); prev = [id];
 
     } else {
       const id = nid('act');
-      nodes.push({ id, kind: 'action', label: text });
+      nodes.push({ id, kind: 'action', label: text, lane });
       link(prev, id, lbl); prev = [id];
     }
   }
 
   if (!nodes.length) throw new Error('活动图为空');
-  return { nodes, edges };
+  return { nodes, edges, activityEdge, swimlanes };
 }
 
 /* ---------------- 时序图 ---------------- */

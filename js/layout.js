@@ -1,4 +1,4 @@
-﻿/* ==========================================================================
+﻿﻿﻿﻿﻿﻿/* ==========================================================================
  *  布局层
  * ========================================================================== */
 
@@ -242,6 +242,68 @@ function layoutActivity(model) {
   }
 }
 
+/* 活动图容器：活动边 + 泳道（基于归一化后的节点坐标计算） */
+function layoutActivityContainers(model) {
+  const { nodes, activityEdge, swimlanes } = model;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of nodes) {
+    minX = Math.min(minX, n.x - n.w / 2);
+    minY = Math.min(minY, n.y - n.h / 2);
+    maxX = Math.max(maxX, n.x + n.w / 2);
+    maxY = Math.max(maxY, n.y + n.h / 2);
+  }
+  if (minX === Infinity) { minX = 0; minY = 0; maxX = 220; maxY = 130; }
+  const PAD = 26;
+  const ax = minX - PAD, ay = minY - PAD, aw = maxX - minX + PAD * 2, ah = maxY - minY + PAD * 2;
+
+  if (activityEdge) {
+    activityEdge.x = ax; activityEdge.y = ay;
+    activityEdge.w = aw; activityEdge.h = ah;
+  }
+  if (swimlanes && swimlanes.length) {
+    const regionX = activityEdge ? activityEdge.x : ax;
+    const regionY = activityEdge ? activityEdge.y : ay;
+    const regionW = activityEdge ? activityEdge.w : aw;
+    const regionH = activityEdge ? activityEdge.h : ah;
+    // 水平泳道(:h)为横条，自上而下紧贴均分；垂直泳道(:v)为竖条，自左向右均分
+    const hs = swimlanes.filter(s => s.dir === 'h');
+    if (hs.length) {
+      const hh = regionH / hs.length;
+      hs.forEach((s, i) => { s.x = regionX; s.y = regionY + i * hh; s.w = regionW; s.h = hh; });
+    }
+    const vs = swimlanes.filter(s => s.dir === 'v');
+    if (vs.length) {
+      const vw = regionW / vs.length;
+      vs.forEach((s, i) => { s.x = regionX + i * vw; s.y = regionY; s.w = vw; s.h = regionH; });
+    }
+    // 把归入泳道的节点约束进各自泳道范围内（默认沿泳道中心线排布）
+    const M = 14;
+    for (const s of swimlanes) {
+      const owned = nodes.filter(n => n.lane === s.label);
+      if (!owned.length) continue;
+      const box = swimlanes.filter(o => o.label === s.label);
+      if (box.length !== 1) continue;
+      const lane = box[0];
+      // 水平泳道：节点居中，纵向均匀错开
+      if (lane.dir === 'h') {
+        const topY = lane.y + M;
+        const bottomY = lane.y + lane.h - M;
+        owned.forEach((n, i) => {
+          n.x = Math.min(Math.max(n.x, lane.x + M), lane.x + lane.w - M);
+          n.y = Math.min(Math.max(n.y, topY + (bottomY - topY) * (i + 1) / (owned.length + 1), lane.y + M), lane.y + lane.h - M);
+        });
+      } else {
+        const leftX = lane.x + M;
+        const rightX = lane.x + lane.w - M;
+        owned.forEach((n, i) => {
+          n.y = Math.min(Math.max(n.y, lane.y + M), lane.y + lane.h - M);
+          n.x = Math.min(Math.max(n.x, leftX + (rightX - leftX) * (i + 1) / (owned.length + 1), lane.x + M), lane.x + lane.w - M);
+        });
+      }
+    }
+  }
+}
+
 /* -------- 时序图布局 -------- */
 
 function layoutSequence(model) {
@@ -390,4 +452,3 @@ function normalizeUsecaseBoundary(model) {
   model.titleX = model.contentW / 2;
   model.titleY = 42;
 }
-
