@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿/* ==========================================================================
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ==========================================================================
  *  渲染层
  * ========================================================================== */
 
@@ -40,11 +40,26 @@ const SVG_CSS = `
 .title-text{font-family:${FONT};font-size:19px;font-weight:700;fill:#1e293b;}
 .mult-text{font-family:${FONT};font-size:11.5px;fill:#334155;}
 .seq-box{fill:#eef2ff;stroke:#6366f1;stroke-width:1.6;}
+.seq-box-actor{fill:#fff7ed;stroke:#f97316;}
 .seq-life{stroke:#c7d2fe;stroke-width:1.5;stroke-dasharray:5 5;}
 .seq-msg{stroke:#334155;stroke-width:1.6;fill:none;}
 .seq-msg-dashed{stroke-dasharray:7 5;}
 .seq-msg-text{font-family:${FONT};font-size:12.5px;fill:#1e293b;}
+.seq-msg-sync{font-weight:600;}
 .seq-actor-text{font-family:${FONT};font-size:13px;font-weight:600;fill:#312e81;}
+.seq-arrow-open{stroke:#334155;stroke-width:1.5;fill:none;stroke-linecap:round;stroke-linejoin:round;}
+.seq-glyph{stroke:#475569;stroke-width:1.6;fill:none;stroke-linecap:round;}
+.control-arrow{stroke:#475569;stroke-width:1.8;fill:none;stroke-linecap:round;}
+.boundary-circle{stroke:#475569;stroke-width:1.6;fill:#ffffff;}
+.seq-glyph-ellipse{stroke:#475569;stroke-width:1.6;}
+.seq-stereo{font-family:${FONT};font-size:10px;fill:#64748b;letter-spacing:0.5px;}
+.seq-create-tag{font-family:${FONT};font-size:11px;fill:#0f766e;font-style:italic;}
+.seq-activation{fill:#e0e7ff;stroke:#6366f1;stroke-width:1.5;}
+.seq-frag{fill:#f8fafc;fill-opacity:0.55;stroke:#64748b;stroke-width:1.3;stroke-dasharray:6 4;}
+.seq-frag-tag{fill:#e2e8f0;stroke:#475569;stroke-width:1;stroke-dasharray:none;}
+.seq-frag-tag-text{font-family:${FONT};font-size:11.5px;font-weight:700;fill:#334155;}
+.seq-frag-sep{stroke:#94a3b8;stroke-width:1.2;stroke-dasharray:none;}
+.seq-frag-sep-text{font-family:${FONT};font-size:10.5px;fill:#475569;font-style:italic;}
 .hit{fill:transparent;pointer-events:all;}
 `;
 
@@ -783,9 +798,151 @@ function buildGraphContent(model) {
   return root;
 }
 
+/* ---------------- 顺序图（时序图）渲染 ---------------- */
+
+// 箭头记号：open=开放箭头（折线），fill=实心箭头（填充三角）
+// 返回 line/polygon 描述，按方向 dir（1 指向右）朝 x 目标点
+function seqArrowEl(x, y, dir, kind) {
+  const out = [];
+  const s = 5.5; // 箭头半高
+  if (kind === 'fill') {
+    out.push(el('polygon', {
+      points: `${x},${y} ${x - dir * (s + 2)},${y + s} ${x - dir * (s + 2)},${y - s}`,
+      class: 'arrow-fill'
+    }));
+  } else {
+    // 开口 V 形箭头（与类图 arrow-line 一致）：两条线汇聚到尖端
+    out.push(el('polyline', {
+      points: `${x - dir * (s + 2)},${y + s} ${x},${y} ${x - dir * (s + 2)},${y - s}`,
+      class: 'seq-arrow-open', 'fill': 'none'
+    }));
+  }
+  return out;
+}
+
+// 参与者头部图形 + 名称，返回 SVG 元素数组
+function seqPartGlyph(p) {
+  const cx = p.x, cy = p.y;
+  const box = [];
+  // 透明命中区，方便整块拖动
+  box.push(el('rect', { x: cx - p.w / 2, y: cy - p.h / 2, width: p.w, height: p.h, rx: 6, class: 'hit' }));
+
+  if (p.kind === 'object') {
+    // 对象：保留外框，名称居中
+    box.push(el('rect', {
+      x: cx - p.w / 2, y: cy - 22, width: p.w, height: 44, rx: 6, class: 'seq-box'
+    }));
+    box.push(el('text', { x: cx, y: cy + 5, class: 'seq-actor-text', 'text-anchor': 'middle' }, p.label));
+    return box;
+  }
+
+  if (p.kind === 'actor') {
+    // 角色：无外框，复刻活动图的火柴小人，名称置于下方
+    const figTop = cy - 26, FH = 14;
+    box.push(
+      el('circle', { cx, cy: figTop + 7, r: 6, class: 'actor-head' }),
+      el('line', { x1: cx, y1: figTop + 14, x2: cx, y2: figTop + 32, class: 'actor-line' }),
+      el('line', { x1: cx - 14, y1: figTop + 23, x2: cx + 14, y2: figTop + 23, class: 'actor-line' }),
+      el('line', { x1: cx, y1: figTop + 32, x2: cx - 12, y2: figTop + 48, class: 'actor-line' }),
+      el('line', { x1: cx, y1: figTop + 32, x2: cx + 12, y2: figTop + 48, class: 'actor-line' }),
+      el('text', { x: cx, y: cy + 26, class: 'node-actor-label', 'text-anchor': 'middle' }, p.label)
+    );
+    return box;
+  }
+
+  // 控制类 / 实体类 / 边界类：无外框，标准 UML 版型图标 + 名称
+  const cyc = cy - 4, R = 13;
+  if (p.kind === 'control') {
+    // 圆 + 顶部开口箭头（⟳，参照参考图）
+    box.push(el('circle', { cx, cy: cyc, r: R+1, class: 'seq-glyph', fill: 'none' }));
+    const tipX = cx - 2, tipY = cyc - R - 1;
+    box.push(el('line', { x1: tipX, y1: tipY, x2: tipX + 5, y2: tipY - 4, class: 'control-arrow' }));
+    box.push(el('line', { x1: tipX, y1: tipY, x2: tipX + 5, y2: tipY + 4, class: 'control-arrow' }));
+    box.push(el('text', { x: cx, y: cy + 32, class: 'seq-actor-text', 'text-anchor': 'middle' }, p.label));
+  } else if (p.kind === 'entity') {
+    // 圆 + 底部横线（标准实体类）
+    box.push(el('circle', { cx, cy: cyc, r: R, class: 'seq-glyph', fill: 'none' }));
+    box.push(el('line', { x1: cx - R, y1: cyc + R, x2: cx + R, y2: cyc + R, class: 'actor-line' }));
+    box.push(el('text', { x: cx, y: cy + 32, class: 'seq-actor-text', 'text-anchor': 'middle' }, p.label));
+  } else if (p.kind === 'boundary') {
+    // 圆 + 左侧竖线与中部横线相连（|-〇，参照参考图）
+    box.push(el('circle', { cx, cy: cyc, r: R, class: 'seq-glyph', fill: 'none' }));
+    const Lx = cx - R - 6;
+    box.push(el('line', { x1: Lx, y1: cyc - R, x2: Lx, y2: cyc + R, class: 'actor-line' }));
+    box.push(el('line', { x1: Lx, y1: cyc, x2: cx - R, y2: cyc, class: 'actor-line' }));
+    box.push(el('text', { x: cx, y: cy + 32, class: 'seq-actor-text', 'text-anchor': 'middle' }, p.label));
+  } else {
+    // 兜底：默认画框
+    box.push(el('rect', { x: cx - p.w / 2, y: cy - 22, width: p.w, height: 44, rx: 6, class: 'seq-box' }));
+    box.push(el('text', { x: cx, y: cy + 5, class: 'seq-actor-text', 'text-anchor': 'middle' }, p.label));
+  }
+  return box;
+}
+
+// 画一条消息（含箭头与文字）：端点自动吸附到覆盖该块的激活条（否则落在生命线）
+function seqMessageEl(m, partMap, activations) {
+  const g = el('g');
+  const from = partMap.get(m.from), to = partMap.get(m.to);
+  if (!from || !to) return g;
+  const y = m.y;
+
+  // 取某参与者在 m.row 时刻的激活条横向位置（取层级最深即 off 最大者）
+  const actX = (part, row) => {
+    let cx = part.x, bestOff = -Infinity, found = false;
+    for (const a of activations) {
+      if (a.part === part.ref && a.startRow <= row && row <= a.endRow && a.off >= bestOff) {
+        cx = part.x + (a.off || 0) * 7; bestOff = a.off; found = true;
+      }
+    }
+    return cx;
+  };
+
+  if (m.self) {
+    // 反身消息：向右延伸后折返回自身激活条/生命线
+    const x = actX(from, m.row);
+    const arm = 30;
+    const seg = el('path', {
+      d: `M ${x} ${y} h ${arm} v 16 h -${arm}`,
+      class: 'seq-msg' + (m.dash ? ' seq-msg-dashed' : ''),
+      fill: 'none'
+    });
+    g.appendChild(seg);
+    seqArrowEl(x, y + 16, -1, m.fill ? 'fill' : 'open').forEach(e => g.appendChild(e));
+    if (m.label) g.appendChild(el('text', { x: x + arm + 8, y: y + 8, class: 'seq-msg-text' }, m.label));
+    if (m.create) g.appendChild(el('text', { x: x + arm + 8, y: y + 20, class: 'seq-create-tag' }, '«create»'));
+    return g;
+  }
+
+  const fromX = actX(from, m.row);
+  const toX = actX(to, m.row);
+  const dir = toX >= fromX ? 1 : -1;
+  const x2 = toX - dir * 2;
+  g.appendChild(el('line', {
+    x1: fromX, y1: y, x2: x2, y2: y,
+    class: 'seq-msg' + (m.dash ? ' seq-msg-dashed' : '')
+  }));
+  seqArrowEl(toX, y, dir, m.fill ? 'fill' : 'open').forEach(e => g.appendChild(e));
+
+  const mid = (fromX + toX) / 2;
+  if (m.label) {
+    const tx = m.self ? 0 : (dir > 0 ? mid : mid - 4);
+    let anchor = m.self ? '' : (dir > 0 ? 'middle' : 'end');
+    if (m.self) anchor = '';
+    const label = el('text', {
+      x: tx, y: y - 8, 'text-anchor': anchor, class: 'seq-msg-text' + (m.fill ? ' seq-msg-sync' : '')
+    }, m.label);
+    g.appendChild(label);
+  }
+  if (m.create) {
+    const tx = mid, anchor = dir > 0 ? 'middle' : 'end';
+    g.appendChild(el('text', { x: tx, y: y + 14, 'text-anchor': anchor, class: 'seq-create-tag' }, '«create»'));
+  }
+  return g;
+}
+
 function buildSequenceContent(model) {
   const g = el('g');
-  const { actors, messages, title } = model;
+  const { participants, messages, activations, fragments, title } = model;
   const W = model.contentW;
   const H = model.contentH;
 
@@ -795,55 +952,120 @@ function buildSequenceContent(model) {
     }, title));
   }
 
-  const bottom = H - 28;
+  const partMap = new Map(participants.map(p => [p.ref, p]));
+  const sepYof = (p) => p.lifeTop;
+  const bottom = model.lifeBottom != null ? model.lifeBottom : H - 24;
 
-  for (const a of actors) {
+  // 1. 生命线（虚线，从参与者头部底端到画布底）
+  for (const p of participants) {
+    const top = (p.y != null ? p.y + p.h / 2 : sepYof(p));
     g.appendChild(el('line', {
-      x1: a.x, y1: a.y + a.h / 2, x2: a.x, y2: bottom, class: 'seq-life'
+      x1: p.x, y1: top, x2: p.x, y2: bottom, class: 'seq-life'
     }));
   }
 
-  for (const m of messages) {
-    const from = actors.find(a => a.id === m.from);
-    const to = actors.find(a => a.id === m.to);
-    if (!from || !to) continue;
-
-    if (from === to) {
-      const x = from.x, y = m.y;
-      g.appendChild(el('path', {
-        d: `M ${x} ${y} h 34 v 18 h -34`,
-        class: 'seq-msg' + (m.dashed ? ' seq-msg-dashed' : '')
-      }));
-      g.appendChild(el('polygon', {
-        points: `${x},${y + 18} ${x + 9},${y + 14} ${x + 9},${y + 22}`,
-        class: 'arrow-fill'
-      }));
-      g.appendChild(el('text', { x: x + 46, y: y + 10, class: 'seq-msg-text' }, m.label));
-    } else {
-      const dir = to.x > from.x ? 1 : -1;
-      g.appendChild(el('line', {
-        x1: from.x, y1: m.y, x2: to.x - dir * 10, y2: m.y,
-        class: 'seq-msg' + (m.dashed ? ' seq-msg-dashed' : '')
-      }));
-      g.appendChild(el('polygon', {
-        points: `${to.x},${m.y} ${to.x - dir * 11},${m.y - 5} ${to.x - dir * 11},${m.y + 5}`,
-        class: 'arrow-fill'
-      }));
-      g.appendChild(el('text', {
-        x: (from.x + to.x) / 2, y: m.y - 8,
-        'text-anchor': 'middle', class: 'seq-msg-text'
-      }, m.label));
+  // 2. 组合片段（先画在消息下层，避免遮挡消息线的视觉层级混乱 → 放在生命线之上、激活/消息之下）
+  const fragG = el('g');
+  for (let i = 0; i < fragments.length; i++) {
+    const f = fragments[i];
+    const fg = el('g', { 'data-node-id': 'seq-frag-' + i, 'data-seqkind': 'frag', 'data-seqidx': i });
+    fg.appendChild(el('rect', {
+      x: f.x, y: f.y, width: f.w, height: f.h,
+      rx: 4, class: 'seq-frag'
+    }));
+    fg.appendChild(el('path', {
+      d: `M ${f.x} ${f.y} h 32 v ${f.h} h -32 Z`,
+      class: 'seq-frag-tag'
+    }));
+    fg.appendChild(el('text', {
+      x: f.x + 16, y: f.y + 16, 'text-anchor': 'middle', class: 'seq-frag-tag-text'
+    }, f.label || f.op.toUpperCase()));
+    // 分隔线（opt/alt 等）——由 seps 提供
+    for (const sy of f.sepY || []) {
+      fg.appendChild(el('line', { x1: f.x, y1: sy, x2: f.x + f.w, y2: sy, class: 'seq-frag-sep' }));
     }
+    // alt 分支标签
+    for (let si = 0; si < (f.seps || []).length; si++) {
+      const sy = f.sepY[si];
+      const lbl = f.seps[si].label;
+      if (lbl) fg.appendChild(el('text', { x: f.x + 6, y: sy - 5, class: 'seq-frag-sep-text' }, '[' + lbl + ']'));
+    }
+    // 四角大小调整命中区（透明，拖拽四角调整组合片段大小）
+    const HS = 14;
+    const corns = [
+      ['nw', f.x,         f.y,         'nwse-resize'],
+      ['ne', f.x + f.w,   f.y,         'nesw-resize'],
+      ['sw', f.x,         f.y + f.h,   'nesw-resize'],
+      ['se', f.x + f.w,   f.y + f.h,   'nwse-resize']
+    ];
+    for (const [corner, cx, cy, cur] of corns) {
+      fg.appendChild(el('rect', {
+        x: cx - HS / 2, y: cy - HS / 2, width: HS, height: HS, rx: 3,
+        fill: 'rgba(0,0,0,0)', 'pointer-events': 'all',
+        'data-ctype': 'seqFrag', 'data-cidx': i, 'data-corner': corner, cursor: cur
+      }));
+    }
+    fragG.appendChild(fg);
+  }
+  g.appendChild(fragG);
+
+  // 3. 激活条 / 控制焦点
+  const actG = el('g');
+  for (let i = 0; i < activations.length; i++) {
+    const a = activations[i];
+    const part = partMap.get(a.part);
+    if (!part) continue;
+    const w = 18;
+    const cx = part.x + (a.off || 0) * 7;
+    const topAct = Math.min(a.startY, a.endY);
+    const hAct = Math.max(Math.abs(a.endY - a.startY), 8);
+    const ag = el('g', { 'data-node-id': 'seq-act-' + i, 'data-seqkind': 'act', 'data-seqidx': i });
+    ag.appendChild(el('rect', {
+      x: cx - w / 2, y: topAct, width: w, height: hAct, class: 'seq-activation'
+    }));
+    // 上下端点长度调节手柄（透明命中区）：拖顶点/底点单独调整激活条的起止
+    const EDGE = 10;
+    ag.appendChild(el('rect', {
+      x: cx - w / 2 - 2, y: topAct - EDGE / 2, width: w + 4, height: EDGE, rx: 2,
+      fill: 'rgba(0,0,0,0)', 'pointer-events': 'all', 'data-act-edge': 'top', 'data-cidx': i, cursor: 'ns-resize'
+    }));
+    ag.appendChild(el('rect', {
+      x: cx - w / 2 - 2, y: topAct + hAct - EDGE / 2, width: w + 4, height: EDGE, rx: 2,
+      fill: 'rgba(0,0,0,0)', 'pointer-events': 'all', 'data-act-edge': 'bottom', 'data-cidx': i, cursor: 'ns-resize'
+    }));
+    actG.appendChild(ag);
+  }
+  g.appendChild(actG);
+
+  // 4. 消息（含箭头与文本）
+  const msgG = el('g');
+  for (let i = 0; i < messages.length; i++) {
+    const mg = seqMessageEl({ ...messages[i], label: messages[i].label }, partMap, activations);
+    // 消息自身也可被垂直拖拽（仅纵向）
+    mg.setAttribute('data-node-id', 'seq-msg-' + i);
+    mg.setAttribute('data-seqkind', 'msg');
+    mg.setAttribute('data-seqidx', i);
+    msgG.appendChild(mg);
+  }
+  g.appendChild(msgG);
+
+  // 5. 参与者（头部框，含图标与文本；绘制在最上层以便点击拖动）
+  for (let i = 0; i < participants.length; i++) {
+    const p = participants[i];
+    const pg = el('g', { 'data-node-id': 'seq-part-' + i, 'data-seqkind': 'part', 'data-seqidx': i });
+    seqPartGlyph(p).forEach(e => pg.appendChild(e));
+    // 版型文本（若存在）由 glyph 内部处理
+    g.appendChild(pg);
   }
 
-  for (const a of actors) {
+  // 6. 生命线底部统一高度调节手柄（置于顶层以保证可点击）
+  if (participants.length) {
+    const lh = W / 2;
     g.appendChild(el('rect', {
-      x: a.x - a.w / 2, y: a.y - a.h / 2,
-      width: a.w, height: a.h, rx: 8, class: 'seq-box'
+      x: lh - 30, y: bottom - 10, width: 60, height: 20, rx: 4,
+      fill: 'rgba(0,0,0,0)', 'pointer-events': 'all',
+      'data-seq-life-handle': 's', cursor: 'ns-resize'
     }));
-    g.appendChild(el('text', {
-      x: a.x, y: a.y + 5, 'text-anchor': 'middle', class: 'seq-actor-text'
-    }, a.label));
   }
 
   return g;

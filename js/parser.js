@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ---------------- 解析层 ---------------- */
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ---------------- 解析层 ---------------- */
 
 const DIAGRAM_ALIASES = {
   class: 'class', classdiagram: 'class', '类图': 'class',
@@ -356,49 +356,134 @@ function parseActivity(lines) {
 
 /* ---------------- 时序图 ---------------- */
 
-function parseSequence(lines) {
-  const actors = [];
-  const actorMap = new Map();
-  const messages = [];
+// 时序图消息箭头算子（按长度降序，先匹配长算子）
+const SEQ_OPS = [
+  { op: '->>', kind: 'sync',   dash: false, fill: true  }, // 同步消息：实线实心箭头
+  { op: '->*', kind: 'create', dash: false, fill: true  }, // 创建消息：实线实心 + <<create>>
+  { op: '->o', kind: 'async',  dash: false, fill: false }, // 异步消息：实线开放箭头
+  { op: '-->', kind: 'return', dash: true,  fill: false }, // 返回消息：虚线开放箭头
+  { op: '->',  kind: 'simple', dash: false, fill: false }, // 简单消息：实线开放箭头
+];
+const SEQ_PART_KINDS = ['actor', 'object', 'control', 'entity', 'boundary'];
 
-  const ensureActor = (name) => {
-    if (!actorMap.has(name)) {
-      const a = { id: name, label: name };
-      actorMap.set(name, a);
-      actors.push(a);
+function parseSequence(lines) {
+  const participants = [];
+  const pmap = new Map();
+  const messages = [];
+  const activations = [];
+  const fragmentStack = [];
+  const fragments = [];
+  const pendingAct = new Map();
+  const actOffsets = new Map();
+
+  // 参与者：声明用立体类型；消息里引用时自动以 defaultKinds 补全
+  const ensurePart = (name, kind) => {
+    kind = kind || 'object';
+    if (!pmap.has(name)) {
+      const p = { id: 'p' + participants.length, ref: name, label: name, kind };
+      pmap.set(name, p);
+      participants.push(p);
+    } else if (kind !== 'object' && pmap.get(name).kind === 'object') {
+      pmap.get(name).kind = kind; // 若随后显式声明了立体类型，升级之
     }
-    return actorMap.get(name);
+    return pmap.get(name);
   };
+
+  let row = 0;
+  const nextRow = () => row++;
 
   for (const { text } of lines) {
     let m;
-    if ((m = text.match(/^(?:participant|actor)\s+(.+)$/i))) {
-      let rest = m[1].trim();
+    // 1. 参与者声明（角色 / 对象 / 控制类 / 实体类 / 边界类）
+    if ((m = text.match(/^(actor|object|control|entity|boundary|participant)\s+(.+)$/i))) {
+      const kind = m[1].toLowerCase() === 'participant' ? 'object' : m[1].toLowerCase();
+      let rest = m[2].trim();
       const am = rest.match(/^(.+?)\s+as\s+(\S+)$/i);
-      if (am) {
-        const a = ensureActor(am[2]);
-        a.label = am[1].trim();
-      } else {
-        const [nm] = readToken(rest);
-        if (nm) ensureActor(nm);
+      let ref, label;
+      if (am) { label = readToken(am[1])[0]; ref = am[2].trim(); }
+      else { const t = readToken(rest); label = t[0]; ref = t[0]; }
+      if (!ref) continue;
+      const p = ensurePart(ref, kind);
+      p.label = label;
+      continue;
+    }
+
+    // 2. 组合片段开关
+    if ((m = text.match(/^(alt|opt|loop|par|break|critical|ref)(?:\s+(.*))?$/i)) && (SEQ_PART_KINDS.indexOf(m[1].toLowerCase()) < 0)) {
+      const op = m[1].toLowerCase();
+      // ref 为引用片段，不嵌套（直接作为独立元素）
+      const fid = 'f' + fragments.length;
+      const fr = { id: fid, op, label: (m[2] || '').trim(), startRow: nextRow(), endRow: 0, seps: [] };
+      fragments.push(fr);
+      fragmentStack.push(fr);
+      continue;
+    }
+    if (/^else(?:\s|$)/i.test(text)) {
+      const cur = fragmentStack[fragmentStack.length - 1];
+      const r = nextRow();
+      if (cur) cur.seps.push({ row: r, label: text.replace(/^else\s*/i, '').trim() });
+      continue;
+    }
+    if (/^end$/i.test(text)) {
+      const cur = fragmentStack.pop();
+      const r = nextRow();
+      if (cur) cur.endRow = r;
+      continue;
+    }
+
+    // 3. 激活 / 去激活（off 取当前嵌套深度，保证顺序多段激活都落在生命线 x 处）
+    if ((m = text.match(/^activate\s+(.+)$/i))) {
+      const ref = readToken(m[1].trim())[0];
+      if (!ref) continue;
+      const p = ensurePart(ref, 'object');
+      const depth = actOffsets.get(p.ref) || 0;
+      actOffsets.set(p.ref, depth + 1);
+      const r = nextRow();
+      const act = { id: 'a' + activations.length, part: p.ref, startRow: r, endRow: -1, off: depth };
+      activations.push(act);
+      pendingAct.set(p.ref, act);
+      continue;
+    }
+    if ((m = text.match(/^deactivate\s+(.+)$/i))) {
+      const ref = readToken(m[1].trim())[0];
+      const r = nextRow();
+      if (ref) {
+        const pa = pendingAct.get(ref);
+        if (pa) {
+          pa.endRow = r; pendingAct.delete(ref);
+          const d = actOffsets.get(ref) || 0;
+          actOffsets.set(ref, Math.max(0, d - 1));
+        }
+        else activations.push({ id: 'a' + activations.length, part: ref, startRow: r, endRow: r + 1, off: 0 });
       }
       continue;
     }
 
+    // 4. 消息：<发送方> <算子> <接收方> [: 文本]
     const ci = text.indexOf(':');
-    if (ci === -1) continue;
-    const leftPart = text.slice(0, ci).trim();
-    const label = text.slice(ci + 1).trim();
-    const am = leftPart.match(/^(.+?)\s*(-{1,2}>)\s*(.+)$/);
-    if (!am) continue;
-    const from = am[1].trim();
-    const dashed = am[2] === '-->';
-    const to = am[3].trim();
-    ensureActor(from); ensureActor(to);
-    messages.push({ from, to, label, dashed });
+    const pre = (ci !== -1 ? text.slice(0, ci) : text).match(/^(.+?)\s*(->>|->\*|->o|-->|->)\s*(.+?)\s*$/);
+    if (!pre) continue;
+    const fromName = pre[1].trim(), toName = pre[3].trim();
+    const opSpec = SEQ_OPS.find(o => o.op === pre[2]) || SEQ_OPS[SEQ_OPS.length - 1];
+    const label = ci !== -1 ? text.slice(ci + 1).trim() : '';
+    const fp = ensurePart(fromName, 'object');
+    const tp = ensurePart(toName, 'object');
+    const isSelf = fp === tp;
+    const isCreate = opSpec.kind === 'create';
+    const r = nextRow();
+    messages.push({
+      id: 'm' + messages.length, from: fp.ref, to: tp.ref, label,
+      op: opSpec.kind, dash: opSpec.dash, fill: opSpec.fill,
+      self: isSelf, create: isCreate, row: r
+    });
   }
 
-  return { nodes: [], edges: [], actors, messages };
+  // 未闭合的激活/片段收到末尾
+  const lastRow = Math.max(row - 1, 0);
+  for (const [, act] of pendingAct) act.endRow = lastRow;
+  for (const fr of fragmentStack) fr.endRow = lastRow;
+
+  return { nodes: [], edges: [], participants, messages, activations, fragments };
 }
 
 /* ---------------- 顶层解析 ---------------- */
@@ -452,6 +537,40 @@ function parseDSL(src) {
 function parseLayoutBlock(lines, type) {
   const out = [];
   for (const { text: raw } of lines) {
+    // 时序图：生命线统一底部高度 <y>
+    const lb = raw.match(/^lifeBottom\s+([-+0-9.]+)\s*$/i);
+    if (lb) {
+      const v = parseFloat(lb[1]);
+      if (!isNaN(v) && v > 0) out.push({ kind: 'seqLifeBottom', v });
+      continue;
+    }
+    // 时序图：参与者 <名> @ (x, y) [w h]
+    const pm2 = raw.match(/^participant\s+(.+?)\s+@\s*\(([-+0-9.]+)\s*,\s*([-+0-9.]+)\s*\)\s*(?:([-0-9.]+)\s+([-0-9.]+))?\s*$/i);
+    if (pm2) {
+      out.push({ kind: 'seqPart', name: pm2[1].trim(), x: +pm2[2], y: +pm2[3],
+                 w: pm2[4] != null ? +pm2[4] : undefined, h: pm2[5] != null ? +pm2[5] : undefined });
+      continue;
+    }
+    // 时序图：消息 <序号> @ (x, y)　x 可用 _ 表示“不约束水平位置”
+    const ms = raw.match(/^message\s+(\d+)\s+@\s*\(([-_+0-9.]+)\s*,\s*([-+0-9.]+)\s*\)\s*$/i);
+    if (ms) {
+      out.push({ kind: 'seqMsg', idx: +ms[1], x: ms[2] === '_' ? undefined : +ms[2], y: +ms[3] });
+      continue;
+    }
+    // 时序图：激活条 <序号> @ (x, y) [h]　y 为激活条顶部，h 为高度（仅一个可选数字）
+    const at = raw.match(/^activation\s+(\d+)\s+@\s*\(([-_+0-9.]+)\s*,\s*([-+0-9.]+)\s*\)\s*(?:([-0-9.]+))?\s*$/i);
+    if (at) {
+      out.push({ kind: 'seqAct', idx: +at[1], y: +at[3],
+                 h: at[4] != null ? +at[4] : undefined });
+      continue;
+    }
+    // 时序图：组合片段 <序号> @ (x, y) [w h]
+    const fg = raw.match(/^fragment\s+(\d+)\s+@\s*\(([-+0-9.]+)\s*,\s*([-+0-9.]+)\s*\)\s*(?:([-0-9.]+)\s+([-0-9.]+))?\s*$/i);
+    if (fg) {
+      out.push({ kind: 'seqFrag', idx: +fg[1], x: +fg[2], y: +fg[3],
+                 w: fg[4] != null ? +fg[4] : undefined, h: fg[5] != null ? +fg[5] : undefined });
+      continue;
+    }
     // 泳道内二级定位：<元素id> @ lane <泳道名> (x, y) [w h]　坐标相对该泳道（泳道即内部元素的画布）
     const lm = raw.match(/^([A-Za-z_][\w.]*)\s+@\s+lane\s+(.+?)\s*\(\s*([-+0-9.]+)\s*,\s*([-+0-9.]+)\s*\)\s*(?:([-0-9.]+)\s+([-0-9.]+))?\s*$/i);
     if (lm) {

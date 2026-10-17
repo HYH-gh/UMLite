@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ==========================================================================
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ==========================================================================
  *  布局层
  * ========================================================================== */
 
@@ -413,6 +413,11 @@ function constrainOwnedToLanes(swimlanes, nodes) {
 function applyLayout(model) {
   const L = model.layout;
   if (!L || !L.length) return;
+  // 时序图的位置定义独立处理（参与者/消息/激活/片段）
+  if (model.type === 'sequence') {
+    applySeqLayout(model);
+    return;
+  }
   // 第一遍：一级定位（节点、边界、泳道）用绝对坐标
   for (const item of L) {
     if (item.kind === 'node') {
@@ -481,31 +486,132 @@ function applyLayout(model) {
 /* -------- 时序图布局 -------- */
 
 function layoutSequence(model) {
-  const PAD = 44, GAP = 56;
+  const PAD = 44, GAP = 64;
   const TOP = 24;
   const titleH = model.title ? 48 : 0;
-  const BOX_H = 44;
-  const startY = TOP + titleH;
+  const BOX_H = 64;
+  const HEAD_TOP = TOP + titleH;
 
+  // 参与者 X 坐标（LifeLine 中心）与头部框
   let x = PAD;
-  for (const a of model.actors) {
-    a.w = Math.max(textWidth(a.label, 13, '600') + 40, 96);
-    a.h = BOX_H;
-    a.x = x + a.w / 2;
-    a.y = startY + BOX_H / 2;
-    x += a.w + GAP;
+  for (const p of model.participants) {
+    const iconW = p.kind === 'object' ? 6 : 26;
+    p.w = Math.max(textWidth(p.label, 13, '600') + iconW + 42, 112);
+    p.h = BOX_H;
+    p.x = x + p.w / 2;
+    p.y = HEAD_TOP + BOX_H / 2;
+    p.headTop = HEAD_TOP;
+    p.lifeTop = HEAD_TOP + BOX_H;
+    x += p.w + GAP;
   }
-  const width = Math.max(x - GAP + PAD, 360);
+  model.contentW = Math.max(x - GAP + PAD, 360);
 
-  let y = startY + BOX_H + 44;
+  // 纵向序列行
+  const ROW_H = 40;
+  const firstRowY = HEAD_TOP + BOX_H + 40;
+  const rowY = (r) => firstRowY + r * ROW_H;
+
+  let maxRow = 0;
   for (const m of model.messages) {
-    m.y = y;
-    y += 44;
+    m.y = rowY(m.row);
+    if (m.row > maxRow) maxRow = m.row;
   }
-  const height = y + 36;
+  for (const a of model.activations) {
+    a.startY = rowY(a.startRow) + ROW_H / 2;
+    a.endY = a.endRow >= 0 ? rowY(a.endRow) + ROW_H / 2 : a.startY + ROW_H;
+    // 激活条层级偏移由参与者 x 在渲染时换算
+    if (a.endRow > maxRow) maxRow = a.endRow;
+  }
 
-  model.titleY = TOP + 26;
-  return { width, height };
+  const partByRef = new Map(model.participants.map(p => [p.ref, p]));
+  // 生命线底端
+  const lifeBottom = firstRowY + (maxRow + 1) * ROW_H + 70;
+
+  // 组合片段：Y 范围 + X 包围盒
+  for (const f of model.fragments) {
+    const y1 = rowY(f.startRow) - 6;
+    const y2 = rowY(Math.max(f.endRow, f.startRow + 1)) + ROW_H + 6;
+    f.y = y1;
+    f.h = Math.max(y2 - y1, 34);
+    let minX = Infinity, maxX = -Infinity;
+    for (const m of model.messages) {
+      if (m.row >= f.startRow && m.row <= f.endRow) {
+        const a = partByRef.get(m.from), b = partByRef.get(m.to);
+        if (a) { minX = Math.min(minX, a.x - a.w / 2); maxX = Math.max(maxX, a.x + a.w / 2); }
+        if (b) { minX = Math.min(minX, b.x - b.w / 2); maxX = Math.max(maxX, b.x + b.w / 2); }
+      }
+    }
+    if (minX === Infinity) { minX = PAD; maxX = model.contentW - PAD; }
+    const FPAD = 22;
+    f.x = minX - FPAD;
+    f.w = (maxX - minX) + FPAD * 2;
+    f.sepY = (f.seps || []).map(s => rowY(s.row) + ROW_H / 2);
+    if (f.endRow > maxRow) maxRow = f.endRow;
+  }
+
+  model.lifeBottom = Math.max(lifeBottom, firstRowY + (maxRow + 1) * ROW_H + 60);
+  model.contentH = model.lifeBottom;
+  model.titleY = 28;
+  return { width: model.contentW, height: model.contentH };
+}
+
+/* 应用时序图的位置定义（参与者/消息/激活/片段） */
+function applySeqLayout(model) {
+  const L = model.layout;
+  if (!L || !L.length) return;
+  for (const item of L) {
+    if (item.kind === 'seqPart') {
+      const p = model.participants.find(pp => pp.ref === item.name || pp.label === item.name);
+      if (p) {
+        p.x = item.x;
+        if (item.y != null) { p.y = item.y; p.headTop = item.y - item.h / 2; p.lifeTop = item.y + item.h / 2; }
+        if (item.w != null) { p.w = item.w; if (item.h != null) p.h = item.h; }
+      }
+    } else if (item.kind === 'seqMsg') {
+      const m = model.messages[item.idx];
+      if (m && item.y != null) m.y = item.y;
+    } else if (item.kind === 'seqAct') {
+      const a = model.activations[item.idx];
+      if (a && item.y != null) {
+        const d = item.y - a.startY;
+        a.startY = item.y; a.endY += d;
+        if (item.h != null) a.endY = a.startY + item.h;
+      }
+    } else if (item.kind === 'seqFrag') {
+      const f = model.fragments[item.idx];
+      if (f) {
+        if (item.x != null) f.x = item.x;
+        if (item.y != null) f.y = item.y;
+        if (item.w != null) f.w = item.w;
+        if (item.h != null) f.h = item.h;
+      }
+    } else if (item.kind === 'seqLifeBottom') {
+      if (item.v != null && item.v > 0) {
+        model.lifeBottom = item.v;
+        model.contentH = Math.max(model.contentH || 0, item.v + 40);
+      }
+    }
+  }
+  // 重算画布边界（含拖动后的越界），并记录负区偏移供 fitView
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of model.participants) {
+    minX = Math.min(minX, p.x - p.w / 2); maxX = Math.max(maxX, p.x + p.w / 2);
+    minY = Math.min(minY, p.lifeTop); maxY = Math.max(maxY, model.lifeBottom || p.lifeTop + 40);
+  }
+  for (const m of model.messages) { minY = Math.min(minY, m.y - 14); maxY = Math.max(maxY, m.y + 16); }
+  const pmapNow = new Map(model.participants.map(p => [p.ref, p]));
+  for (const a of model.activations) {
+    const part = pmapNow.get(a.part);
+    const cx = part ? part.x + (a.off || 0) * 7 : 0;
+    minX = Math.min(minX, cx - 12); maxX = Math.max(maxX, cx + 12);
+    maxY = Math.max(maxY, a.endY);
+  }
+  for (const f of model.fragments) { minX = Math.min(minX, f.x); maxX = Math.max(maxX, f.x + f.w); minY = Math.min(minY, f.y); maxY = Math.max(maxY, f.y + f.h); }
+  const PAD = 40;
+  model.contentW = (maxX === -Infinity ? 360 : maxX - minX) + PAD;
+  model.contentH = Math.max(model.contentH, (maxY === -Infinity ? 300 : maxY)) + PAD;
+  model.layoutMinX = Math.min(0, minX - PAD);
+  model.layoutMinY = Math.min(0, minY - PAD);
 }
 
 /* -------- 归一化到原点 -------- */

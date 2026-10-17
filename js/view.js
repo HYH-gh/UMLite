@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ==========================================================================
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ==========================================================================
  *  视图状态 & 绘制
  * ========================================================================== */
 
@@ -10,8 +10,11 @@ let _vbW = 800, _vbH = 600;
 let dragState = null;
 let panState = null;
 let resizeState = null;
+let lifeDragState = null;
+let actEdgeDrag = null;
 let swimDragState = null;
 let bendDragState = null;
+let seqDrag = null;
 let paintQueued = false;
 
 const preview = document.getElementById('preview');
@@ -73,8 +76,16 @@ function paint() {
   svgEl.addEventListener('pointerdown', onCanvasPointerDown);
 
   viewportEl.querySelectorAll('[data-node-id]').forEach(elm => {
+    if (elm.getAttribute('data-seqkind')) return; // 顺序图元素走专属拖拽
     elm.style.cursor = 'grab';
     elm.addEventListener('pointerdown', onNodePointerDown);
+  });
+
+  // 顺序图元素拖拽（参与者/激活条/消息/组合片段）
+  viewportEl.querySelectorAll('[data-seqkind]').forEach(elm => {
+    const kind = elm.getAttribute('data-seqkind');
+    elm.style.cursor = kind === 'msg' || kind === 'act' ? 'ns-resize' : 'move';
+    elm.addEventListener('pointerdown', onSeqPointerDown);
   });
 
   viewportEl.querySelectorAll('[data-boundary-handle]').forEach(elm => {
@@ -83,6 +94,14 @@ function paint() {
 
   viewportEl.querySelectorAll('[data-ctype]').forEach(elm => {
     elm.addEventListener('pointerdown', onContainerHandlePointerDown);
+  });
+
+  viewportEl.querySelectorAll('[data-seq-life-handle]').forEach(elm => {
+    elm.addEventListener('pointerdown', onLifeHandlePointerDown);
+  });
+
+  viewportEl.querySelectorAll('[data-act-edge]').forEach(elm => {
+    elm.addEventListener('pointerdown', onActEdgePointerDown);
   });
 
   viewportEl.querySelectorAll('[data-swimlane-body]').forEach(elm => {
@@ -145,6 +164,42 @@ function onNodePointerDown(evt) {
   document.body.style.cursor = 'grabbing';
 }
 
+/* 顺序图元素拖拽：part 可平移；msg/act 仅纵向；frag 可平移 */
+function onSeqPointerDown(evt) {
+  if (evt.button !== 0) return;
+  const kind = evt.currentTarget.getAttribute('data-seqkind');
+  const idx = +evt.currentTarget.getAttribute('data-seqidx');
+  if (!currentModel) return;
+
+  const p = clientToBase(evt.clientX, evt.clientY);
+  let obj = null;
+  if (kind === 'part') obj = currentModel.participants && currentModel.participants[idx];
+  else if (kind === 'act') obj = currentModel.activations && currentModel.activations[idx];
+  else if (kind === 'msg') obj = currentModel.messages && currentModel.messages[idx];
+  else if (kind === 'frag') obj = currentModel.fragments && currentModel.fragments[idx];
+  if (!obj) return;
+
+  evt.stopPropagation();
+  evt.preventDefault();
+  const startX = p.x, startY = p.y;
+  const baseX = obj.x, baseY = kind === 'act' ? obj.startY : obj.y;
+  const baseEnd = kind === 'act' ? obj.endY : 0;
+
+  let fn = null;
+  if (kind === 'act') {
+    fn = (dx, dy) => { obj.startY = baseY + dy; obj.endY = baseEnd + dy; };
+  } else if (kind === 'msg') {
+    fn = (dx, dy) => { obj.y = baseY + dy; };
+  } else if (kind === 'part') {
+    fn = (dx, dy) => { obj.x = baseX + dx; obj.y = baseY + dy; };
+  } else if (kind === 'frag') {
+    fn = (dx, dy) => { obj.x = baseX + dx; obj.y = baseY + dy; };
+  }
+
+  seqDrag = { fn, startX, startY };
+  document.body.style.cursor = 'grabbing';
+}
+
 function onCanvasPointerDown(evt) {
   if (evt.button !== 0 && evt.button !== 1) return;
   evt.preventDefault();
@@ -184,24 +239,52 @@ function onPointerMoveResize(evt) {
   const p = clientToBase(evt.clientX, evt.clientY);
   const s = resizeState;
   const b = resizeState.obj;
+  const mn = s.min || BOUNDARY_MIN;
   const dx = p.x - s.startX;
   const dy = p.y - s.startY;
 
   let x = s.bx0, y = s.by0, w = s.bw0, h = s.bh0;
-  if (s.corner.includes('e')) w = Math.max(BOUNDARY_MIN, s.bw0 + dx);
-  if (s.corner.includes('s')) h = Math.max(BOUNDARY_MIN, s.bh0 + dy);
+  if (s.corner.includes('e')) w = Math.max(mn, s.bw0 + dx);
+  if (s.corner.includes('s')) h = Math.max(mn, s.bh0 + dy);
   if (s.corner.includes('w')) {
-    w = Math.max(BOUNDARY_MIN, s.bw0 - dx);
+    w = Math.max(mn, s.bw0 - dx);
     x = s.bx0 + (s.bw0 - w);
   }
   if (s.corner.includes('n')) {
-    h = Math.max(BOUNDARY_MIN, s.bh0 - dy);
+    h = Math.max(mn, s.bh0 - dy);
     y = s.by0 + (s.bh0 - h);
   }
 
   b.x = x; b.y = y; b.w = w; b.h = h;
   schedulePaint();
   evt.preventDefault();
+}
+
+// 生命线统一高度调节：纵向拖拽底部手柄改变全部生命线高度
+function onLifeHandlePointerDown(evt) {
+  if (evt.button !== 0 || !currentModel) return;
+  evt.stopPropagation();
+  evt.preventDefault();
+  const p = clientToBase(evt.clientX, evt.clientY);
+  const cur = currentModel.lifeBottom != null
+    ? currentModel.lifeBottom
+    : ((currentModel.contentH || 400) - 24);
+  lifeDragState = { baseBottom: cur, startY: p.y, min: 100 };
+  document.body.style.cursor = 'ns-resize';
+}
+
+// 激活条上下端点长度调节
+function onActEdgePointerDown(evt) {
+  if (evt.button !== 0 || !currentModel) return;
+  const idx = +evt.currentTarget.getAttribute('data-cidx');
+  const edge = evt.currentTarget.getAttribute('data-act-edge');
+  const a = currentModel.activations && currentModel.activations[idx];
+  if (!a) return;
+  evt.stopPropagation();
+  evt.preventDefault();
+  const p = clientToBase(evt.clientX, evt.clientY);
+  actEdgeDrag = { idx, edge, startY: p.y, baseStart: a.startY, baseEnd: a.endY };
+  document.body.style.cursor = 'ns-resize';
 }
 
 /* ---------------- 活动图容器（泳道 / 活动边）交互 ---------------- */
@@ -216,13 +299,15 @@ function onContainerHandlePointerDown(evt) {
   if (ctype === 'boundary') obj = currentModel && currentModel.boundary;
   else if (ctype === 'activityEdge') obj = currentModel && currentModel.activityEdge;
   else if (ctype === 'swimlane') obj = currentModel && currentModel.swimlanes && currentModel.swimlanes[cidx];
+  else if (ctype === 'seqFrag') obj = currentModel.fragments && currentModel.fragments[cidx];
   if (!obj) return;
 
   evt.stopPropagation();
   evt.preventDefault();
   const p = clientToBase(evt.clientX, evt.clientY);
+  const min = ctype === 'seqFrag' ? 40 : BOUNDARY_MIN;
   resizeState = {
-    corner, obj,
+    corner, obj, min,
     bx0: obj.x, by0: obj.y, bw0: obj.w, bh0: obj.h,
     startX: p.x, startY: p.y
   };
@@ -380,6 +465,31 @@ function onCanvasDblClick(evt) {
 }
 
 document.addEventListener('pointermove', (evt) => {
+  if (actEdgeDrag) {
+    const p = clientToBase(evt.clientX, evt.clientY);
+    const a = currentModel.activations && currentModel.activations[actEdgeDrag.idx];
+    const dy = p.y - actEdgeDrag.startY;
+    if (a) {
+      if (actEdgeDrag.edge === 'top') {
+        a.startY = Math.min(actEdgeDrag.baseStart + dy, a.endY - 8);
+      } else {
+        a.endY = Math.max(actEdgeDrag.baseEnd + dy, a.startY + 8);
+      }
+    }
+    schedulePaint();
+    evt.preventDefault();
+    return;
+  }
+  if (lifeDragState) {
+    const p = clientToBase(evt.clientX, evt.clientY);
+    currentModel.lifeBottom = Math.max(lifeDragState.min, lifeDragState.baseBottom + (p.y - lifeDragState.startY));
+    if (currentModel.contentH != null && currentModel.lifeBottom + 24 > currentModel.contentH) {
+      currentModel.contentH = currentModel.lifeBottom + 24;
+    }
+    schedulePaint();
+    evt.preventDefault();
+    return;
+  }
   if (resizeState) {
     onPointerMoveResize(evt);
     return;
@@ -402,6 +512,13 @@ document.addEventListener('pointermove', (evt) => {
     dragState.node.y = p.y + dragState.offsetY;
     clampToLane(dragState.node); // 归入泳道的节点不可超出泳道范围
     dragState.moved = true;
+    schedulePaint();
+    evt.preventDefault();
+    return;
+  }
+  if (seqDrag) {
+    const p = clientToBase(evt.clientX, evt.clientY);
+    seqDrag.fn(p.x - seqDrag.startX, p.y - seqDrag.startY);
     schedulePaint();
     evt.preventDefault();
     return;
@@ -438,11 +555,14 @@ document.addEventListener('pointerup', () => {
   if (dragState) { dragState = null; document.body.style.cursor = ''; }
   if (panState) { panState = null; document.body.style.cursor = ''; }
   if (resizeState) { resizeState = null; document.body.style.cursor = ''; }
+  if (lifeDragState) { lifeDragState = null; document.body.style.cursor = ''; }
+  if (actEdgeDrag) { actEdgeDrag = null; document.body.style.cursor = ''; }
   if (bendDragState) { bendDragState = null; document.body.style.cursor = ''; }
   if (swimDragState) { swimDragState = null; document.body.style.cursor = ''; }
+  if (seqDrag) { seqDrag = null; document.body.style.cursor = ''; }
 });
 document.addEventListener('pointercancel', () => {
-  dragState = null; panState = null; resizeState = null; bendDragState = null; swimDragState = null; document.body.style.cursor = '';
+  dragState = null; panState = null; resizeState = null; lifeDragState = null; actEdgeDrag = null; bendDragState = null; swimDragState = null; seqDrag = null; document.body.style.cursor = '';
 });
 
 preview.addEventListener('wheel', (evt) => {
@@ -511,7 +631,7 @@ function render() {
     paint();
 
     const count = model.type === 'sequence'
-      ? model.actors.length + model.messages.length
+      ? model.participants.length + model.messages.length + model.activations.length + model.fragments.length
       : model.nodes.length;
     setStatus(`✓ 渲染成功 · 类型：${model.type} · 元素数：${count} · 滚轮缩放 / 拖拽元素 / 空白处拖拽平移`, 'ok');
   } catch (err) {

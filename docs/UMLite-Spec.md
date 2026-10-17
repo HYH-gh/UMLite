@@ -386,43 +386,121 @@ entity 订单项 {
 
 ---
 
-## 7. 时序图（sequence）
+## 7. 顺序图（sequence，时序图）
 
-### 7.1 语法
+顺序图展示对象之间按时间顺序的交互，元素一律横平竖直。
+
+### 7.1 参与者（角色 / 对象 / 控制类 / 实体类 / 边界类）
 
 ```
-participant <显示名> [as <短名>]
-actor <显示名> [as <短名>]
-<发送方> -> <接收方> : 消息文本
-<发送方> --> <接收方> : 返回消息
+actor   <显示名> [as <短名>]    角色（火柴小人 + 框）
+object  <显示名> [as <短名>]    对象（普通矩形框）
+control <显示名> [as <短名>]    控制类（圆圈）
+entity  <显示名> [as <短名>]    实体类（椭圆）
+boundary<显示名> [as <短名>]    边界类（竖条）
 ```
 
-- `participant` 与 `actor` 等价，均渲染为顶部矩形框 + 下方虚线生命线。
-- `->` 表示同步消息（实线箭头）。
-- `-->` 表示返回消息（虚线箭头）。
-- 参与者顺序按首次出现顺序排列。
+- `participant` 等价于 `object`。
+- 若消息中出现了未声明的名字，会自动以普通对象补全；随后若显式声明了其立体类型，则以声明的类型为准。
 - `as` 用于给带空格的显示名指定一个简短的引用名。
+- 每个参与者下方绘制一条虚线生命线（Lifeline）。
 
-### 7.2 示例
+### 7.2 消息（Message）
+
+```
+<发送方> ->  <接收方> : 简单消息（实线开放箭头）
+<发送方> ->> <接收方> : 同步消息（实线实心箭头）
+<发送方> ->o <接收方> : 异步消息（实线开放箭头）
+<发送方> --> <接收方> : 返回消息（虚线开放箭头）
+<发送方> ->* <接收方> : 创建消息（实线实心 + «create» 标签）
+<发送方> -> <发送方>   : 反身消息（折返自身生命线）
+```
+
+消息文本在 `:` 之后；水平箭头的 x 与两个参与者的生命线对齐，竖直方向由行序决定。
+
+### 7.3 激活条 / 控制焦点（Activation）
+
+```
+activate   参与者    开启一个激活条（覆盖在该生命线上的细长矩形）
+deactivate 参与者    闭合最近一个激活条
+```
+
+多个未闭合的 `activate` 会在同一生命线上依序错开层级；文件末尾未闭合的激活条自动延伸到画布底端。同一生命线可以有多段激活条（例如一片激活关闭后再次 `activate`，会在同一生命线上出现第二段）。消息线的端点会自动吸附到覆盖该行的激活条上；无激活条时则落在生命线上。
+
+### 7.4 组合片段（Combined Fragment）
+
+```
+alt 条件     区间逻辑（条件分支）
+opt 条件     可选执行
+loop [n]     循环
+par          并行
+break 条件    中断
+critical     临界区
+ref 标签     引用片段（不自闭合，绘制为独立框架）
+else 其他分支    分隔线（仅用于 alt/opt 等内部）
+end          结束上一片段
+```
+
+组合片段渲染为带操作符标签（左上角）与虚线边框的矩形框，`alt`/`par` 等的 `else` 会绘制分隔线。
+
+### 7.5 示例
 
 ```
 @diagram sequence "用户登录时序图"
 
-participant 用户
-participant 浏览器 as Browser
-participant 网关 as Gateway
-participant 认证服务 as AuthService
-participant 数据库 as DB
+actor 用户
+boundary 浏览器 as Browser
+control 认证服务 as AuthService
+entity 数据库 as DB
+object 网关 as Gateway
 
 用户 -> Browser : 输入账号密码
-Browser -> Gateway : POST /api/login
-Gateway -> AuthService : 转发登录请求
-AuthService -> DB : 查询用户记录
+activate Browser
+Browser -> Gateway : 转发登录请求
+activate Gateway
+Gateway ->> AuthService : 构造并发送令牌请求
+activate AuthService
+AuthService ->> DB : 查询用户记录
+activate DB
 DB --> AuthService : 返回用户数据
-AuthService --> Gateway : 签发 JWT Token
-Gateway --> Browser : 200 OK + Token
-Browser --> 用户 : 跳转首页
+deactivate DB
+alt 校验通过
+    AuthService --> Gateway : 签发 JWT Token
+else 校验失败
+    AuthService --> Gateway : 返回 401
+end
+deactivate AuthService
+// 同一生命线上可有多段激活条：再次激活 AuthService 记录审计
+AuthService -> AuthService : 记录审计日志
+activate AuthService
+AuthService -> AuthService : 写入审计缓存
+AuthService --> AuthService : 审计完成
+deactivate AuthService
+Gateway -> 用户 : 200 OK + Token
+deactivate Gateway
+Browser -> Browser : 记录登录状态（反身消息）
+deactivate Browser
 ```
+
+### 7.6 位置定位（@layout）
+
+顺序图元素可通过末尾的 `@layout` 块进行绝对坐标定位：
+
+```
+@layout
+lifeBottom y                           全部生命线统一底部高度（y）
+participant 用户 @ (x, y) w h       参与者框中心点与宽高
+message 0 @ (_, y)                  第 0 条消息（序号），仅约束纵向 y；_ 表示水平不约束
+activation 1 @ (_, y) h             第 1 个激活条，y 为顶部、h 为高度
+fragment 2 @ (x, y) w h             第 2 个组合片段，左上角与宽高（w/h 可调）
+```
+
+此处坐标为画布绝对坐标（不受代码中的行序/默认自动布局影响）。画布内拖动元素后执行“导出 / 反写代码”，会自动把当前位置写回该位置块，实现双向 round-trip。
+
+- 参与者：平移（x/y）
+- 激活条、消息：仅纵向
+- 组合片段：平移（x/y）+ 大小调整（拖动四角，w/h）
+- 生命线：拖动画布底部手柄统一调整全部生命线高度（对应 `lifeBottom`）
 
 ---
 
@@ -764,7 +842,7 @@ act_2 @ lane 客户 (60, 240) 150 46
 |---|---|
 | 类 / 用例 / 状态 / 组件 / 部署 / 对象 / 包图 | 具名节点 + `boundary`（系统边界框） |
 | 活动图 | **仅泳道**（`lane 泳道名`）与活动边（`boundary`）。泳道内元素不支持定位，仍采用默认布局（自动收拢进泳道） |
-| 时序图 | 不支持 |
+| 时序图 | 参与者（`participant 名`）、消息（`message 序号`）、激活条（`activation 序号`）、组合片段（`fragment 序号`）、生命线统一高度（`lifeBottom`） |
 
 ### 15.3 示例（类图）
 

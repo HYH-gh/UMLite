@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ---------------- UI 绑定 ---------------- */
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ---------------- UI 绑定 ---------------- */
 
 const editor = document.getElementById('editor');
 editor.addEventListener('input', renderDebounced);
@@ -89,7 +89,21 @@ function positionBlockFor(model) {
     }
     return lines.length > 1 ? lines.join('\n') : '';
   }
-  if (model.type === 'sequence') return '';
+  // 时序图：导出参与者 / 消息 / 激活 / 组合片段的位置
+  if (model.type === 'sequence') {
+    const lines = ['@layout'];
+    if (model.lifeBottom != null) lines.push(`lifeBottom ${Math.round(model.lifeBottom)}`);
+    for (const p of model.participants || []) {
+      lines.push(`participant ${p.ref} @ (${Math.round(p.x)}, ${Math.round(p.y)}) ${Math.round(p.w)} ${Math.round(p.h)}`);
+    }
+    (model.messages || []).forEach((m, i) =>
+      lines.push(`message ${i} @ (_, ${Math.round(m.y)})`));
+    (model.activations || []).forEach((a, i) =>
+      lines.push(`activation ${i} @ (_, ${Math.round(a.startY)}) ${Math.round(a.endY - a.startY)}`));
+    (model.fragments || []).forEach((f, i) =>
+      lines.push(`fragment ${i} @ (${Math.round(f.x)}, ${Math.round(f.y)}) ${Math.round(f.w)} ${Math.round(f.h)}`));
+    return lines.length > 1 ? lines.join('\n') : '';
+  }
   const lines = ['@layout'];
   for (const n of model.nodes || []) {
     if (n.kind === 'pseudo') continue;
