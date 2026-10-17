@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ==========================================================================
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ==========================================================================
  *  视图状态 & 绘制
  * ========================================================================== */
 
@@ -30,13 +30,15 @@ function fitView() {
   if (!currentModel) return;
   const W = Math.max(preview.clientWidth, 200);
   const H = Math.max(preview.clientHeight, 200);
-  const cw = currentModel.contentW || 400;
-  const ch = currentModel.contentH || 300;
+  const minX = currentModel.layoutMinX || 0;
+  const minY = currentModel.layoutMinY || 0;
+  const cw = (currentModel.contentW || 400) - minX;
+  const ch = (currentModel.contentH || 300) - minY;
   const pad = 30;
-  const z = Math.min((W - pad * 2) / cw, (H - pad * 2) / ch);
+  const z = Math.min((W - pad * 2) / Math.max(cw, 1), (H - pad * 2) / Math.max(ch, 1));
   view.zoom = clamp(z, 0.08, 1.6);
-  view.panX = (W - cw * view.zoom) / 2;
-  view.panY = (H - ch * view.zoom) / 2;
+  view.panX = (W - cw * view.zoom) / 2 - minX * view.zoom;
+  view.panY = (H - ch * view.zoom) / 2 - minY * view.zoom;
   updateZoomInfo();
 }
 

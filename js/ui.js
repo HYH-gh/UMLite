@@ -1,13 +1,19 @@
-﻿﻿﻿/* ---------------- UI 绑定 ---------------- */
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ---------------- UI 绑定 ---------------- */
 
 const editor = document.getElementById('editor');
 editor.addEventListener('input', renderDebounced);
 
+/* 安全绑定：元素不存在时跳过，避免单个 null 中断后续所有按钮绑定 */
+function bind(id, cb, ev = 'click') {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener(ev, cb);
+}
+
 /* ---------------- 导入 .uml（文件选择 / 拖拽） ---------------- */
 
 const fileInput = document.getElementById('file-uml');
-document.getElementById('btn-open').addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', () => {
+bind('btn-open', () => fileInput && fileInput.click());
+if (fileInput) fileInput.addEventListener('change', () => {
   const f = fileInput.files && fileInput.files[0];
   if (f) loadUml(f);
   fileInput.value = '';
@@ -42,7 +48,7 @@ leftPane.addEventListener('drop', (e) => {
 
 /* ---------------- 反写代码：把当前画布位置写回源码末尾 ---------------- */
 
-document.getElementById('btn-writeback').addEventListener('click', () => {
+bind('btn-writeback', () => {
   if (!currentModel) { setStatus('请先渲染一个图', 'err'); return; }
   const out = withPositionBlock(editor.value, currentModel);
   if (out === editor.value) { setStatus('位置块与当前画布一致，无需改写', 'ok'); return; }
@@ -51,10 +57,10 @@ document.getElementById('btn-writeback').addEventListener('click', () => {
   setStatus('✓ 已把当前画布位置反写入代码末尾', 'ok');
 });
 
-document.getElementById('btn-svg').addEventListener('click', downloadSVG);
-document.getElementById('btn-png').addEventListener('click', () => downloadPNG(2));
+bind('btn-svg', downloadSVG);
+bind('btn-png', () => downloadPNG(2));
 
-document.getElementById('btn-src').addEventListener('click', () => {
+bind('btn-src', () => {
   const out = withPositionBlock(editor.value, currentModel);
   saveBlob(new Blob([out], { type: 'text/plain;charset=utf-8' }), 'diagram.uml');
   setStatus('已导出 diagram.uml（含当前位置信息）', 'ok');
@@ -105,7 +111,7 @@ function withPositionBlock(src, model) {
   return base + '\n\n' + block + '\n';
 }
 
-document.getElementById('btn-copy').addEventListener('click', async () => {
+bind('btn-copy', async () => {
   try {
     await navigator.clipboard.writeText(editor.value);
     setStatus('已复制到剪贴板', 'ok');
@@ -114,7 +120,7 @@ document.getElementById('btn-copy').addEventListener('click', async () => {
   }
 });
 
-document.getElementById('btn-doc').addEventListener('click', async () => {
+bind('btn-doc', async () => {
   try {
     const res = await fetch('docs/UMLite-Spec.md');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -126,17 +132,14 @@ document.getElementById('btn-doc').addEventListener('click', async () => {
   }
 });
 
-document.getElementById('btn-reset').addEventListener('click', () => {
+bind('btn-reset', () => {
   if (!currentModel) return;
   fitView();
   paint();
   setStatus('视图已复位', 'ok');
 });
 
-document.getElementById('btn-refresh').addEventListener('click', () => {
-  render();
-  if (currentModel) setStatus('✓ 已重新渲染', 'ok');
-});
+bind('btn-refresh', () => render());
 
 /* ---------------- 分隔条拖拽（面板宽度可调） ---------------- */
 
@@ -144,7 +147,7 @@ const divider = document.getElementById('divider');
 const mainEl = document.querySelector('main');
 let dividerDragState = null;
 
-divider.addEventListener('pointerdown', (evt) => {
+if (divider) divider.addEventListener('pointerdown', (evt) => {
   if (evt.button !== 0) return;
   evt.preventDefault();
   dividerDragState = { startX: evt.clientX, startLeft: parseFloat(getComputedStyle(mainEl).getPropertyValue('--left-width')) || 44 };

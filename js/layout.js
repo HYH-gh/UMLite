@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ==========================================================================
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ==========================================================================
  *  布局层
  * ========================================================================== */
 
@@ -449,30 +449,33 @@ function applyLayout(model) {
   }
   // 泳道覆盖后，把归入泳道的节点重新收拢回（新位置/新大小的）泳道内
   if (model.swimlanes && model.swimlanes.length) constrainOwnedToLanes(model.swimlanes, model.nodes);
-  // 扩展内容边界，确保覆盖坐标不超出画布（左上角坐标要求非负）
-  let maxX = model.contentW, maxH = model.contentH;
+  // 按覆盖后的坐标计算完整包围盒（含负坐标；例如泳道定位到左侧负区时画布也要能容纳）
+  let minX = 0, minY = 0;
+  let maxX = model.contentW, maxY = model.contentH;
   if (Array.isArray(model.nodes)) {
     for (const n of model.nodes) {
-      const right = n.x + n.w / 2, bottom = n.y + n.h / 2;
-      if (right > maxX) maxX = right;
-      if (bottom > maxH) maxH = bottom;
+      minX = Math.min(minX, n.x - n.w / 2); maxX = Math.max(maxX, n.x + n.w / 2);
+      minY = Math.min(minY, n.y - n.h / 2); maxY = Math.max(maxY, n.y + n.h / 2);
     }
   }
   for (const b of [model.boundary, model.activityEdge]) {
     if (b && b.w) {
-      if (b.x + b.w > maxX) maxX = b.x + b.w;
-      if (b.y + b.h > maxH) maxH = b.y + b.h;
+      minX = Math.min(minX, b.x); maxX = Math.max(maxX, b.x + b.w);
+      minY = Math.min(minY, b.y); maxY = Math.max(maxY, b.y + b.h);
     }
   }
   if (model.swimlanes) {
     for (const s of model.swimlanes) {
-      if (s.x + s.w > maxX) maxX = s.x + s.w;
-      if (s.y + s.h > maxH) maxH = s.y + s.h;
+      minX = Math.min(minX, s.x); maxX = Math.max(maxX, s.x + s.w);
+      minY = Math.min(minY, s.y); maxY = Math.max(maxY, s.y + s.h);
     }
   }
   const PAD = 40;
-  model.contentW = Math.max(model.contentW, maxX + PAD);
-  model.contentH = Math.max(model.contentH, maxH + PAD);
+  model.contentW = maxX + PAD;
+  model.contentH = maxY + PAD;
+  // 记录超出 0 轴的左/上偏移，供 fitView 包含负坐标区域
+  model.layoutMinX = Math.min(0, minX - PAD);
+  model.layoutMinY = Math.min(0, minY - PAD);
 }
 
 /* -------- 时序图布局 -------- */
