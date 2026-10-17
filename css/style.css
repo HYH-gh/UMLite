@@ -30,6 +30,7 @@
   main{flex:1;display:flex;min-height:0;}
   .pane{display:flex;flex-direction:column;min-width:0;min-height:0;}
   #left{width:var(--left-width,44%);background:#fff;}
+  #left.drag-over textarea{outline:2px dashed #3b82f6;outline-offset:-4px;}
   #right{flex:1;background:
      linear-gradient(90deg,rgba(0,0,0,.025) 1px,transparent 1px) 0 0/22px 22px,
      linear-gradient(rgba(0,0,0,.025) 1px,transparent 1px) 0 0/22px 22px, #fbfcfe;

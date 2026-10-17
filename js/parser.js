@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ---------------- 解析层 ---------------- */
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ---------------- 解析层 ---------------- */
 
 const DIAGRAM_ALIASES = {
   class: 'class', classdiagram: 'class', '类图': 'class',
@@ -256,7 +256,7 @@ function parseActivity(lines) {
   const link = (froms, to, label) => {
     for (const f of froms) {
       if (f === to) continue;
-      edges.push({ from: f, to, label: label || '' });
+      edges.push({ from: f, to, label: label || '', head: 'triangle' });
     }
   };
 
@@ -423,12 +423,60 @@ function parseDSL(src) {
   const title = hm[2] || '';
   const body = lines.slice(1);
 
+  // 剥离末尾的 @layout 位置定义块（不影响主体解析）
+  const layout = [];
+  const elementBody = [];
+  let inLayout = false;
+  for (const ln of body) {
+    if (/^@layout\b/i.test(ln.text)) { inLayout = true; continue; }
+    if (inLayout) layout.push(ln); else elementBody.push(ln);
+  }
+
   let model;
-  if (type === 'activity') model = parseActivity(body);
-  else if (type === 'sequence') model = parseSequence(body);
-  else model = parseClassLike(body, type);
+  if (type === 'activity') model = parseActivity(elementBody);
+  else if (type === 'sequence') model = parseSequence(elementBody);
+  else model = parseClassLike(elementBody, type);
 
   model.type = type;
   model.title = title;
+  model.layout = parseLayoutBlock(layout, type);
   return model;
+}
+
+/* 解析 @layout 位置定义块 → { kind, name?, x, y, w?, h? }
+   格式：<元素引用> @ (x, y) [w h]
+   - 普通元素（类/对象/用例等）：@ (cx, cy) 为元素中心点
+   - boundary：@ (x, y) 为左上角，作用于系统边界框 / 活动边
+   - lane 泳道名：@ (x, y) 为左上角，作用于泳道
+   非法/无法识别的行被宽容忽略（不影响图主体）。 */
+function parseLayoutBlock(lines, type) {
+  const out = [];
+  for (const { text: raw } of lines) {
+    // 泳道内二级定位：<元素id> @ lane <泳道名> (x, y) [w h]　坐标相对该泳道（泳道即内部元素的画布）
+    const lm = raw.match(/^([A-Za-z_][\w.]*)\s+@\s+lane\s+(.+?)\s*\(\s*([-+0-9.]+)\s*,\s*([-+0-9.]+)\s*\)\s*(?:([-0-9.]+)\s+([-0-9.]+))?\s*$/i);
+    if (lm) {
+      const lx = parseFloat(lm[3]), ly = parseFloat(lm[4]);
+      if (isNaN(lx) || isNaN(ly)) continue;
+      out.push({ kind: 'laneNode', id: lm[1], lane: lm[2].trim(), x: lx, y: ly,
+                 w: lm[5] != null ? parseFloat(lm[5]) : undefined,
+                 h: lm[6] != null ? parseFloat(lm[6]) : undefined });
+      continue;
+    }
+    const m = raw.match(/^(.+?)\s+@\s*\(\s*([-+0-9.]+)\s*,\s*([-+0-9.]+)\s*\)\s*(?:([-0-9.]+)\s+([-0-9.]+))?\s*$/i);
+    if (!m) continue;
+    const ref = m[1].trim();
+    const x = parseFloat(m[2]), y = parseFloat(m[3]);
+    if (isNaN(x) || isNaN(y)) continue;
+    const w = m[4] != null ? parseFloat(m[4]) : undefined;
+    const h = m[5] != null ? parseFloat(m[5]) : undefined;
+    if (/^lane\s+/i.test(ref)) {
+      out.push({ kind: 'lane', name: ref.slice(4).trim(), x, y, w, h });
+    } else if (/^boundary$/i.test(ref)) {
+      out.push({ kind: 'boundary', x, y, w, h });
+    } else {
+      const kwm = ref.match(/^\s*(?:class|interface|abstract\s*class|entity|object|component|package|usecase|actor|participant|state)\s+(.+?)\s*$/i);
+      out.push({ kind: 'node', name: kwm ? kwm[1].trim() : ref, x, y, w, h });
+    }
+  }
+  return out;
 }

@@ -12,12 +12,15 @@
   <div class="logo">UMLite<small>文本驱动 UML 绘图</small></div>
   <select id="samples" title="载入示例"></select>
   <div class="spacer"></div>
-  <button class="ghost" id="btn-doc">📖 下载语言文档 (.md)</button>
-  <button id="btn-copy">复制代码</button>
+  <button id="btn-writeback">反写代码</button>
+  <button class="ghost" id="btn-doc"> 下载语言文档 (.md)</button>
+  <!-- <button id="btn-copy">复制代码</button> -->
+  <button class="ghost" id="btn-open">导入 .uml</button>   
   <button id="btn-src">下载 .uml</button>
   <button id="btn-svg">下载 SVG</button>
   <button class="primary" id="btn-png">下载 PNG</button>
 </header>
+<input type="file" id="file-uml" accept=".uml,.txt,text/plain" hidden>
 
 <main>
   <div class="pane" id="left">
