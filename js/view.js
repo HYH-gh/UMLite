@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ==========================================================================
+﻿﻿/* ==========================================================================
  *  视图状态 & 绘制
  * ========================================================================== */
 
@@ -57,7 +57,7 @@ function paint() {
     width: W,
     height: H
   });
-  svgEl.appendChild(styleEl(SVG_CSS));
+  svgEl.appendChild(styleEl(svgStyle()));
 
   const content = currentModel.type === 'sequence'
     ? buildSequenceContent(currentModel)
@@ -116,6 +116,9 @@ function paint() {
   svgEl.addEventListener('dblclick', onCanvasDblClick);
 
   updateZoomInfo();
+
+  // 图发生变化（修改代码 / 拖动 / 调整）后，防抖刷新历史记录（示例代码会被内部跳过）
+  if (typeof scheduleHistory === 'function') scheduleHistory();
 }
 
 function schedulePaint() {

@@ -1,7 +1,20 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ---------------- UI 绑定 ---------------- */
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ---------------- UI 绑定 ---------------- */
 
 const editor = document.getElementById('editor');
 editor.addEventListener('input', renderDebounced);
+
+/* ---------------- 字号滑块：统一调整画布所有字体大小 ---------------- */
+(function () {
+  const fsEl = document.getElementById('font-scale');
+  const fsVal = document.getElementById('font-scale-val');
+  if (!fsEl) return;
+  const apply = (v) => {
+    if (typeof setUiFontScale === 'function') setUiFontScale(v);
+    if (fsVal) fsVal.textContent = Math.round(v * 100) + '%';
+  };
+  fsEl.addEventListener('input', () => apply(+fsEl.value / 100));
+  apply(+fsEl.value / 100);
+})();
 
 /* 安全绑定：元素不存在时跳过，避免单个 null 中断后续所有按钮绑定 */
 function bind(id, cb, ev = 'click') {
@@ -203,3 +216,28 @@ window.addEventListener('resize', () => {
     paint();
   }, 160);
 });
+
+/* ---------------- 二级下拉菜单 ---------------- */
+function closeAllMenus() {
+  document.querySelectorAll('.menu-drop.open').forEach(d => d.classList.remove('open'));
+}
+document.querySelectorAll('.menu').forEach((m) => {
+  const btn = m.querySelector('.menu-btn');
+  const drop = m.querySelector('.menu-drop');
+  if (!btn || !drop) return;
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeAllMenus();
+    drop.classList.toggle('open');
+  });
+});
+document.querySelectorAll('.menu-item').forEach((it) => {
+  it.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const target = it.getAttribute('data-click');
+    if (target) { const el = document.getElementById(target); if (el) el.click(); }
+    closeAllMenus();
+  });
+});
+// 点击菜单外部区域时收起所有下拉
+document.addEventListener('click', closeAllMenus);

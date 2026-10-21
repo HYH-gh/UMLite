@@ -6,8 +6,15 @@ const FONT = '-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragin
 
 const _cvs = document.createElement('canvas');
 const _ctx = _cvs.getContext('2d');
+// 全局字号系数：滑块统一调整画布所有字体大小（1=默认 100%）
+let uiFontScale = 1;
+function setUiFontScale(v) {
+  uiFontScale = v;
+  if (typeof schedulePaint === 'function') schedulePaint();
+}
+
 function textWidth(s, size = 13, weight = 'normal') {
-  _ctx.font = `${weight} ${size}px ${FONT}`;
+  _ctx.font = `${weight} ${(size * uiFontScale).toFixed(1)}px ${FONT}`;
   return _ctx.measureText(String(s)).width;
 }
 function el(tag, attrs = {}, children = []) {

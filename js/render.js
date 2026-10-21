@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ==========================================================================
+﻿﻿/* ==========================================================================
  *  渲染层
  * ========================================================================== */
 
@@ -62,6 +62,11 @@ const SVG_CSS = `
 .seq-frag-sep-text{font-family:${FONT};font-size:10.5px;fill:#475569;font-style:italic;}
 .hit{fill:transparent;pointer-events:all;}
 `;
+
+// 生成画布内联样式：所有 font-size 统一乘 uiFontScale，实现字号滑块动态调整
+function svgStyle() {
+  return SVG_CSS.replace(/font-size:([\d.]+)px/g, (m, n) => `font-size:${(parseFloat(n) * uiFontScale).toFixed(1)}px`);
+}
 
 function clipPoint(n, tx, ty) {
   const cx = n.x, cy = n.y;
@@ -229,6 +234,59 @@ function drawEdge(g, e, nodeMap, edges) {
   }
 }
 
+/* ---------------- 共享复合图形 ---------------- */
+
+// 火柴小人（参与者）。headR 为唯一缩放基准：headR=11 即活动图/用例图标准尺寸（scale=1）。
+// 返回元素数组，可 append 到任意容器；label 可选。
+function actorGlyph(cx, top, { headR = 11, label, labelY, labelClass = 'node-actor-label' } = {}) {
+  const s = headR / 11;
+  const bodyTop = top + headR * 2 + 2 * s;
+  const bodyBottom = bodyTop + 30 * s;
+  const out = [
+    el('circle', { cx, cy: top + headR, r: headR, class: 'actor-head' }),
+    el('line', { x1: cx, y1: bodyTop, x2: cx, y2: bodyBottom, class: 'actor-line' }),
+    el('line', { x1: cx - 17 * s, y1: bodyTop + 12 * s, x2: cx + 17 * s, y2: bodyTop + 12 * s, class: 'actor-line' }),
+    el('line', { x1: cx, y1: bodyBottom, x2: cx - 15 * s, y2: bodyBottom + 24 * s, class: 'actor-line' }),
+    el('line', { x1: cx, y1: bodyBottom, x2: cx + 15 * s, y2: bodyBottom + 24 * s, class: 'actor-line' })
+  ];
+  if (label != null) {
+    out.push(el('text', {
+      x: cx, y: top + (labelY != null ? labelY : bodyBottom - top + 30 * s),
+      'text-anchor': 'middle', class: labelClass
+    }, label));
+  }
+  return out;
+}
+
+// 控制类：圆 + 顶部开口箭头（⟳）
+function iconControl(cx, cyc, R, label) {
+  const tipX = cx - 2, tipY = cyc - R - 1;
+  return [
+    el('circle', { cx, cy: cyc, r: R + 1, class: 'seq-glyph', fill: 'none' }),
+    el('line', { x1: tipX, y1: tipY, x2: tipX + 5, y2: tipY - 4, class: 'control-arrow' }),
+    el('line', { x1: tipX, y1: tipY, x2: tipX + 5, y2: tipY + 4, class: 'control-arrow' }),
+    el('text', { x: cx, y: cyc + 36, class: 'seq-actor-text', 'text-anchor': 'middle' }, label)
+  ];
+}
+// 实体类：圆 + 底部横线
+function iconEntity(cx, cyc, R, label) {
+  return [
+    el('circle', { cx, cy: cyc, r: R, class: 'seq-glyph', fill: 'none' }),
+    el('line', { x1: cx - R, y1: cyc + R, x2: cx + R, y2: cyc + R, class: 'actor-line' }),
+    el('text', { x: cx, y: cyc + 36, class: 'seq-actor-text', 'text-anchor': 'middle' }, label)
+  ];
+}
+// 边界类：圆 + 左侧竖线与中部横线（|-〇）
+function iconBoundary(cx, cyc, R, label) {
+  const Lx = cx - R - 6;
+  return [
+    el('circle', { cx, cy: cyc, r: R, class: 'seq-glyph', fill: 'none' }),
+    el('line', { x1: Lx, y1: cyc - R, x2: Lx, y2: cyc + R, class: 'actor-line' }),
+    el('line', { x1: Lx, y1: cyc, x2: cx - R, y2: cyc, class: 'actor-line' }),
+    el('text', { x: cx, y: cyc + 36, class: 'seq-actor-text', 'text-anchor': 'middle' }, label)
+  ];
+}
+
 /* ---------------- 节点绘制 ---------------- */
 
 function drawNode(g, n, type) {
@@ -263,17 +321,10 @@ function drawNode(g, n, type) {
 
   if (type === 'usecase') {
     if (n.kind === 'actor') {
-      const cx = n.x, top = y + 4, headR = 11;
-      g.appendChild(el('circle', { cx, cy: top + headR, r: headR, class: 'actor-head' }));
-      const bodyTop = top + headR * 2 + 2;
-      const bodyBottom = bodyTop + 30;
-      g.appendChild(el('line', { x1: cx, y1: bodyTop, x2: cx, y2: bodyBottom, class: 'actor-line' }));
-      g.appendChild(el('line', { x1: cx - 17, y1: bodyTop + 12, x2: cx + 17, y2: bodyTop + 12, class: 'actor-line' }));
-      g.appendChild(el('line', { x1: cx, y1: bodyBottom, x2: cx - 15, y2: bodyBottom + 24, class: 'actor-line' }));
-      g.appendChild(el('line', { x1: cx, y1: bodyBottom, x2: cx + 15, y2: bodyBottom + 24, class: 'actor-line' }));
-      g.appendChild(el('text', {
-        x: cx, y: y + n.h + 18, 'text-anchor': 'middle', class: 'node-actor-label'
-      }, n.label));
+      const cx = n.x, top = y + 4;
+      for (const e of actorGlyph(cx, top, { headR: 11, label: n.label, labelY: n.h + 14 })) {
+        g.appendChild(e);
+      }
       return;
     }
     g.appendChild(el('ellipse', { cx: n.x, cy: n.y, rx: n.w / 2, ry: n.h / 2, class: 'usecase-ellipse' }));
@@ -535,10 +586,10 @@ function drawNode(g, n, type) {
     x, y, width: n.w, height: headH,
     class: 'node-header'
   }));
-  g.appendChild(el('rect', {
-    x, y: y + headH - 7, width: n.w, height: 7,
-    class: 'node-header', stroke: 'none'
-  }));
+  // g.appendChild(el('rect', {
+  //   x, y: y + headH - 7, width: n.w, height: 7,
+  //   class: 'node-header', stroke: 'none'
+  // }));
   g.appendChild(el('line', {
     x1: x, y1: y + headH , x2: x + n.w, y2: y + headH,
     stroke: '#94a3b8', 'stroke-width': 1
@@ -579,7 +630,7 @@ function drawNode(g, n, type) {
   if (n._hasSep) {
     const sy = y + sepY + n._attrCount * 18 + 4;
     g.appendChild(el('line', {
-      x1: x + 8, y1: sy - 8, x2: x + n.w - 8, y2: sy - 8,
+      x1: x , y1: sy - 8, x2: x + n.w, y2: sy - 8,
       stroke: '#94a3b8', 'stroke-width': 2
     }));
   }
@@ -837,40 +888,20 @@ function seqPartGlyph(p) {
   }
 
   if (p.kind === 'actor') {
-    // 角色：无外框，复刻活动图的火柴小人，名称置于下方
-    const figTop = cy - 26, FH = 14;
-    box.push(
-      el('circle', { cx, cy: figTop + 7, r: 6, class: 'actor-head' }),
-      el('line', { x1: cx, y1: figTop + 14, x2: cx, y2: figTop + 32, class: 'actor-line' }),
-      el('line', { x1: cx - 14, y1: figTop + 23, x2: cx + 14, y2: figTop + 23, class: 'actor-line' }),
-      el('line', { x1: cx, y1: figTop + 32, x2: cx - 12, y2: figTop + 48, class: 'actor-line' }),
-      el('line', { x1: cx, y1: figTop + 32, x2: cx + 12, y2: figTop + 48, class: 'actor-line' }),
-      el('text', { x: cx, y: cy + 26, class: 'node-actor-label', 'text-anchor': 'middle' }, p.label)
-    );
+    // 角色：无外框，复刻活动图的火柴小人（headR=6 的小号缩放版），名称置于下方
+    const figTop = cy - 26;
+    box.push(...actorGlyph(cx, figTop, { headR: 6, label: p.label, labelY: 52 }));
     return box;
   }
 
   // 控制类 / 实体类 / 边界类：无外框，标准 UML 版型图标 + 名称
   const cyc = cy - 4, R = 13;
   if (p.kind === 'control') {
-    // 圆 + 顶部开口箭头（⟳，参照参考图）
-    box.push(el('circle', { cx, cy: cyc, r: R+1, class: 'seq-glyph', fill: 'none' }));
-    const tipX = cx - 2, tipY = cyc - R - 1;
-    box.push(el('line', { x1: tipX, y1: tipY, x2: tipX + 5, y2: tipY - 4, class: 'control-arrow' }));
-    box.push(el('line', { x1: tipX, y1: tipY, x2: tipX + 5, y2: tipY + 4, class: 'control-arrow' }));
-    box.push(el('text', { x: cx, y: cy + 32, class: 'seq-actor-text', 'text-anchor': 'middle' }, p.label));
+    return box.concat(iconControl(cx, cyc, R, p.label));
   } else if (p.kind === 'entity') {
-    // 圆 + 底部横线（标准实体类）
-    box.push(el('circle', { cx, cy: cyc, r: R, class: 'seq-glyph', fill: 'none' }));
-    box.push(el('line', { x1: cx - R, y1: cyc + R, x2: cx + R, y2: cyc + R, class: 'actor-line' }));
-    box.push(el('text', { x: cx, y: cy + 32, class: 'seq-actor-text', 'text-anchor': 'middle' }, p.label));
+    return box.concat(iconEntity(cx, cyc, R, p.label));
   } else if (p.kind === 'boundary') {
-    // 圆 + 左侧竖线与中部横线相连（|-〇，参照参考图）
-    box.push(el('circle', { cx, cy: cyc, r: R, class: 'seq-glyph', fill: 'none' }));
-    const Lx = cx - R - 6;
-    box.push(el('line', { x1: Lx, y1: cyc - R, x2: Lx, y2: cyc + R, class: 'actor-line' }));
-    box.push(el('line', { x1: Lx, y1: cyc, x2: cx - R, y2: cyc, class: 'actor-line' }));
-    box.push(el('text', { x: cx, y: cy + 32, class: 'seq-actor-text', 'text-anchor': 'middle' }, p.label));
+    return box.concat(iconBoundary(cx, cyc, R, p.label));
   } else {
     // 兜底：默认画框
     box.push(el('rect', { x: cx - p.w / 2, y: cy - 22, width: p.w, height: 44, rx: 6, class: 'seq-box' }));
@@ -974,11 +1005,12 @@ function buildSequenceContent(model) {
       rx: 4, class: 'seq-frag'
     }));
     fg.appendChild(el('path', {
-      d: `M ${f.x} ${f.y} h 32 v ${f.h} h -32 Z`,
+      // d: `M ${f.x} ${f.y} h 32 v ${f.h} h -32 Z`,
+      d: `M ${f.x} ${f.y} h 55 v 20 l -10 10 h -45 Z`,
       class: 'seq-frag-tag'
     }));
     fg.appendChild(el('text', {
-      x: f.x + 16, y: f.y + 16, 'text-anchor': 'middle', class: 'seq-frag-tag-text'
+      x: f.x + 20, y: f.y + 16, 'text-anchor': 'middle', class: 'seq-frag-tag-text'
     }, f.label || f.op.toUpperCase()));
     // 分隔线（opt/alt 等）——由 seps 提供
     for (const sy of f.sepY || []) {

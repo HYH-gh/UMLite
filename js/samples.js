@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ---------------- 内置示例 ---------------- */
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ---------------- 内置示例 ---------------- */
 
 const SAMPLES = {
   '类图 · 电商系统': `@diagram class "电商系统类图"
@@ -333,7 +333,8 @@ fragment 0 @ (345, 565) 791 238
 已退款 --> [*]
 `,
 
-  '组件图 · 微服务': `@diagram component "微服务架构组件图"
+  '组件图 · 微服务': `
+ @diagram component "微服务架构组件图"
 
 component 网关服务 {
   + 路由转发
@@ -367,6 +368,16 @@ component 数据库
 用户服务 --> 数据库 : JDBC
 订单服务 --> 数据库 : JDBC
 网关服务 ..> 配置中心 : 拉取配置
+
+@layout
+网关服务 @ (284, 324) 124 78
+用户服务 @ (284, 141) 124 78
+订单服务 @ (530, 324) 124 78
+支付服务 @ (283, 531) 124 78
+消息队列 @ (531, 534) 124 44
+配置中心 @ (72, 320) 124 44
+数据库 @ (527, 141) 124 44
+
 `,
 
   '部署图 · 生产环境': `@diagram deployment "生产环境部署图"
@@ -441,7 +452,7 @@ package 数据层 {
 
 const sampleSelect = document.getElementById('samples');
 const ph = document.createElement('option');
-ph.textContent = '📚 载入示例…';
+ph.textContent = '载入示例…';
 ph.value = '';
 sampleSelect.appendChild(ph);
 for (const name of Object.keys(SAMPLES)) {

@@ -8,34 +8,84 @@
 </head>
 <body>
 
+<!-- 内联 SVG 图标库（line 风格，随 currentColor 变化） -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <symbol id="ic-file" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11H4m15.5 5a.5.5 0 0 0 .5-.5V8a1 1 0 0 0-1-1h-3.75a1 1 0 0 1-.829-.44l-1.436-2.12a1 1 0 0 0-.828-.44H8a1 1 0 0 0-1 1M4 9v10a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-7a1 1 0 0 0-1-1h-3.75a1 1 0 0 1-.829-.44L9.985 8.44A1 1 0 0 0 9.157 8H5a1 1 0 0 0-1 1Z"/></symbol>
+  <symbol id="ic-open" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 19V6a1 1 0 0 1 1-1h4.032a1 1 0 0 1 .768.36l1.9 2.28a1 1 0 0 0 .768.36H16a1 1 0 0 1 1 1v1M3 19l3-8h15l-3 8H3Z"/></symbol>
+  <symbol id="ic-export" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 15v2a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-2M12 4v12m0-12 4 4m-4-4L8 8"/></symbol>
+  <symbol id="ic-history" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3M3.22302 14C4.13247 18.008 7.71683 21 12 21c4.9706 0 9-4.0294 9-9 0-4.97056-4.0294-9-9-9-3.72916 0-6.92858 2.26806-8.29409 5.5M7 9H3V5"/></symbol>
+  <symbol id="ic-help" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.529 9.988a2.502 2.502 0 1 1 5 .191A2.441 2.441 0 0 1 12 12.582V14m-.01 3.008H12M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></symbol>
+  <symbol id="ic-source" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 3v4a1 1 0 0 1-1 1H5m5 4-2 2 2 2m4-4 2 2-2 2m5-12v16a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7.914a1 1 0 0 1 .293-.707l3.914-3.914A1 1 0 0 1 9.914 3H18a1 1 0 0 1 1 1Z"/></symbol>
+  <symbol id="ic-refresh" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.651 7.65a7.131 7.131 0 0 0-12.68 3.15M18.001 4v4h-4m-7.652 8.35a7.13 7.13 0 0 0 12.68-3.15M6 20v-4h4"/></symbol>
+</svg>
+
 <header>
   <div class="logo">UMLite<small>文本驱动 UML 绘图</small></div>
-  <select id="samples" title="载入示例"></select>
+  <span class="sel-ic"><svg class="ic"><use href="#ic-open"></use></svg><select id="samples" title="载入示例"></select></span>
   <div class="spacer"></div>
-  <button id="btn-writeback">反写代码</button>
-  <button class="ghost" id="btn-doc"> 下载语言文档 (.md)</button>
-  <!-- <button id="btn-copy">复制代码</button> -->
-  <button class="ghost" id="btn-open">导入 .uml</button>   
-  <button id="btn-src">下载 .uml</button>
-  <button id="btn-svg">下载 SVG</button>
-  <button class="primary" id="btn-png">下载 PNG</button>
+
+  <button id="btn-writeback" title="把当前画布位置写回源码末尾">反写代码</button>
+
+  <div class="menu">
+    <button type="button" class="ghost menu-btn"><svg class="ic"><use href="#ic-file"></use></svg>文件<span class="caret">▾</span></button>
+    <div class="menu-drop drop-right">
+      <button type="button" class="menu-item" data-click="btn-open">导入 .uml…</button>
+      <button type="button" class="menu-item" data-click="btn-copy">复制代码</button>
+    </div>
+  </div>
+
+  <div class="menu">
+    <button type="button" class="ghost menu-btn"><svg class="ic"><use href="#ic-export"></use></svg>导出<span class="caret">▾</span></button>
+    <div class="menu-drop">
+      <button type="button" class="menu-item" data-click="btn-src">下载 .uml 源文件</button>
+      <button type="button" class="menu-item" data-click="btn-svg">下载 SVG 矢量图</button>
+      <button type="button" class="menu-item" data-click="btn-png">下载 PNG 位图</button>
+    </div>
+  </div>
+
+  <button class="ghost" id="btn-history" title="最近保存的图"><svg class="ic"><use href="#ic-history"></use></svg>历史</button>
+
+  <div class="menu">
+    <button type="button" class="ghost menu-btn"><svg class="ic"><use href="#ic-help"></use></svg>帮助<span class="caret">▾</span></button>
+    <div class="menu-drop">
+      <button type="button" class="menu-item" data-click="btn-doc">下载语言文档 (.md)</button>
+    </div>
+  </div>
 </header>
+
+<!-- 被二级菜单收纳的真实按钮（保留 id，供菜单项 data-click 转发触发） -->
+<button id="btn-open" hidden></button>
+<button id="btn-copy" hidden></button>
+<button id="btn-src" hidden></button>
+<button id="btn-svg" hidden></button>
+<button id="btn-png" hidden></button>
+<button id="btn-doc" hidden></button>
 <input type="file" id="file-uml" accept=".uml,.txt,text/plain" hidden>
+
+<div id="history-panel" class="history-panel hidden">
+  <div class="history-head">
+    <svg class="ic"><use href="#ic-history"></use></svg>历史记录 <span class="history-count" id="history-count"></span>
+    <span style="flex:1"></span>
+    <button class="ghost" id="his-clear">清空</button>
+  </div>
+  <div class="history-list" id="history-list"></div>
+</div>
 
 <main>
   <div class="pane" id="left">
-    <div class="pane-head">📝 源代码 <span class="hint">支持 class / usecase / activity / er / sequence / state / component / deployment / object / package</span></div>
+    <div class="pane-head"><svg class="ic ic-title"><use href="#ic-source"></use></svg>源代码 <span class="hint">支持 class / usecase / activity / er / sequence / state / component / deployment / object / package</span></div>
     <textarea id="editor" spellcheck="false"></textarea>
   </div>
   <div class="divider" id="divider"></div>
   <div class="pane" id="right">
     <div class="pane-head">
-      👁 预览
+      预览
       <span class="badge">滚轮缩放</span>
       <span class="badge">拖拽元素</span>
       <span class="badge">空白处拖拽平移</span>
       <button id="btn-reset" style="padding:3px 10px;font-size:11.5px;">⟲ 复位视图</button>
-      <button id="btn-refresh" style="padding:3px 10px;font-size:11.5px;">⟳ 刷新渲染</button>
+      <button id="btn-refresh" style="padding:3px 10px;font-size:11.5px;"><svg class="ic ic-sm"><use href="#ic-refresh"></use></svg>刷新渲染</button>
+      <span class="fs-wrap" title="统一调整画布字号"><span class="fs-label">A</span><input type="range" id="font-scale" min="70" max="160" value="100" step="5"><span class="fs-label" id="font-scale-val">100%</span></span>
       <span class="zoominfo" id="zoominfo">100%</span>
     </div>
     <div id="preview"></div>
@@ -53,6 +103,7 @@
   <script src="js/export.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/samples.js"></script>
+  <script src="js/history.js"></script>
   <script src="js/main.js"></script>
 </body>
 </html>
