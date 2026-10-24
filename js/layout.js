@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ==========================================================================
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ==========================================================================
  *  布局层
  * ========================================================================== */
 
@@ -440,6 +440,29 @@ function applyLayout(model) {
       }
     }
   }
+  // 应用连线折点：按 <from>-><to> 定位边，按序号重建 bends（沿折线有序、无空洞）
+  {
+    const bendByEdge = new Map();
+    for (const item of L) {
+      if (item.kind !== 'edgeBend') continue;
+      const e = model.edges && model.edges.find(ed => ed.from === item.from && ed.to === item.to);
+      if (!e) continue;
+      if (!bendByEdge.has(e)) bendByEdge.set(e, []);
+      bendByEdge.get(e).push({ idx: item.idx, x: item.x, y: item.y });
+    }
+    for (const [e, list] of bendByEdge) {
+      const sorted = [...list].sort((a, b) => a.idx - b.idx);
+      e.bends = sorted.map(t => ({ x: t.x, y: t.y }));
+    }
+  }
+  // 应用连线端点锚点：需边已有折点，锚点相对起点/终点节点中心的边缘偏移
+  for (const item of L) {
+    if (item.kind !== 'edgeAnchor') continue;
+    const e = model.edges && model.edges.find(ed => ed.from === item.from && ed.to === item.to);
+    if (!e || !e.bends || !e.bends.length) continue;
+    const anchor = { dx: item.dx, dy: item.dy };
+    if (item.which === 'start') e.aAnchor = anchor; else e.bAnchor = anchor;
+  }
   // 第二遍：二级定位（泳道内元素），坐标相对其泳道 = 泳道位置 + 相对坐标
   for (const item of L) {
     if (item.kind !== 'laneNode') continue;
@@ -473,6 +496,15 @@ function applyLayout(model) {
     for (const s of model.swimlanes) {
       minX = Math.min(minX, s.x); maxX = Math.max(maxX, s.x + s.w);
       minY = Math.min(minY, s.y); maxY = Math.max(maxY, s.y + s.h);
+    }
+  }
+  // 连线折点纳入包围盒（折点定位到较远位置时画布也要能容纳）
+  for (const e of model.edges || []) {
+    if (!e.bends) continue;
+    for (const b of e.bends) {
+      if (!isFinite(b.x) || !isFinite(b.y)) continue;
+      minX = Math.min(minX, b.x); maxX = Math.max(maxX, b.x);
+      minY = Math.min(minY, b.y); maxY = Math.max(maxY, b.y);
     }
   }
   const PAD = 40;

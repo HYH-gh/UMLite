@@ -1,4 +1,4 @@
-﻿﻿/* ==========================================================================
+﻿﻿﻿﻿﻿﻿/* ==========================================================================
  *  视图状态 & 绘制
  * ========================================================================== */
 
@@ -14,6 +14,7 @@ let lifeDragState = null;
 let actEdgeDrag = null;
 let swimDragState = null;
 let bendDragState = null;
+let anchorDragState = null;
 let seqDrag = null;
 let paintQueued = false;
 
@@ -112,6 +113,9 @@ function paint() {
   viewportEl.querySelectorAll('[data-bend-edge]').forEach(elm => {
     elm.addEventListener('pointerdown', onBendPointerDown);
     elm.addEventListener('dblclick', onBendDblClick);
+  });
+  viewportEl.querySelectorAll('[data-anchor-edge]').forEach(elm => {
+    elm.addEventListener('pointerdown', onAnchorPointerDown);
   });
   svgEl.addEventListener('dblclick', onCanvasDblClick);
 
@@ -435,6 +439,17 @@ function onBendPointerDown(evt) {
   document.body.style.cursor = 'move';
 }
 
+function onAnchorPointerDown(evt) {
+  if (evt.button !== 0) return;
+  if (!currentModel) return;
+  const ei = +evt.currentTarget.getAttribute('data-anchor-edge');
+  const which = evt.currentTarget.getAttribute('data-anchor-end'); // 'start' | 'end'
+  evt.stopPropagation();
+  evt.preventDefault();
+  anchorDragState = { ei, which };
+  document.body.style.cursor = 'grabbing';
+}
+
 function onBendDblClick(evt) {
   if (!currentModel) return;
   evt.stopPropagation();
@@ -444,7 +459,7 @@ function onBendDblClick(evt) {
   const e = currentModel.edges[ei];
   if (e && e.bends) {
     e.bends.splice(bi, 1);
-    if (!e.bends.length) e.bends = null;
+    if (!e.bends.length) { e.bends = null; e.aAnchor = undefined; e.bAnchor = undefined; }
     schedulePaint();
     setStatus('已删除折点', 'ok');
   }
@@ -495,6 +510,21 @@ document.addEventListener('pointermove', (evt) => {
   }
   if (resizeState) {
     onPointerMoveResize(evt);
+    return;
+  }
+  if (anchorDragState) {
+    const p = clientToBase(evt.clientX, evt.clientY);
+    const e = currentModel.edges && currentModel.edges[anchorDragState.ei];
+    if (e) {
+      const srcId = anchorDragState.which === 'start' ? e.from : e.to;
+      const nd = currentModel.nodes && currentModel.nodes.find(nn => nn.id === srcId);
+      if (nd) {
+        const off = anchorOffset(nd, p.x, p.y);
+        if (anchorDragState.which === 'start') e.aAnchor = off; else e.bAnchor = off;
+      }
+    }
+    schedulePaint();
+    evt.preventDefault();
     return;
   }
   if (bendDragState) {
@@ -561,11 +591,12 @@ document.addEventListener('pointerup', () => {
   if (lifeDragState) { lifeDragState = null; document.body.style.cursor = ''; }
   if (actEdgeDrag) { actEdgeDrag = null; document.body.style.cursor = ''; }
   if (bendDragState) { bendDragState = null; document.body.style.cursor = ''; }
+  if (anchorDragState) { anchorDragState = null; document.body.style.cursor = ''; }
   if (swimDragState) { swimDragState = null; document.body.style.cursor = ''; }
   if (seqDrag) { seqDrag = null; document.body.style.cursor = ''; }
 });
 document.addEventListener('pointercancel', () => {
-  dragState = null; panState = null; resizeState = null; lifeDragState = null; actEdgeDrag = null; bendDragState = null; swimDragState = null; seqDrag = null; document.body.style.cursor = '';
+  dragState = null; panState = null; resizeState = null; lifeDragState = null; actEdgeDrag = null; bendDragState = null; anchorDragState = null; swimDragState = null; seqDrag = null; document.body.style.cursor = '';
 });
 
 preview.addEventListener('wheel', (evt) => {

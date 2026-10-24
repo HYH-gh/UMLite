@@ -1,4 +1,4 @@
-﻿/* ---------------- 导出 ---------------- */
+/* ---------------- 导出 ---------------- */
 
 function serializeSVG(svg) {
   const clone = svg.cloneNode(true);

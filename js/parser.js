@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ---------------- 解析层 ---------------- */
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ---------------- 解析层 ---------------- */
 
 const DIAGRAM_ALIASES = {
   class: 'class', classdiagram: 'class', '类图': 'class',
@@ -579,6 +579,20 @@ function parseLayoutBlock(lines, type) {
       out.push({ kind: 'laneNode', id: lm[1], lane: lm[2].trim(), x: lx, y: ly,
                  w: lm[5] != null ? parseFloat(lm[5]) : undefined,
                  h: lm[6] != null ? parseFloat(lm[6]) : undefined });
+      continue;
+    }
+    // 连线折点：edge <起点>-><终点> bend <序号> @ (x, y)　坐标即折点绝对位置，序号为沿线(bends)顺序
+    const be = raw.match(/^edge\s+(.+?)\s*->\s*(.+?)\s+bend\s+(\d+)\s+@\s*\(\s*([-+0-9.]+)\s*,\s*([-+0-9.]+)\s*\)\s*$/i);
+    if (be) {
+      const x = parseFloat(be[4]), y = parseFloat(be[5]);
+      if (!isNaN(x) && !isNaN(y)) out.push({ kind: 'edgeBend', from: be[1].trim(), to: be[2].trim(), idx: +be[3], x, y });
+      continue;
+    }
+    // 连线端点锚点：edge <起点>-><终点> (start|end) (dx, dy)　dx/dy 为相对起点/终点节点中心的边缘偏移
+    const an = raw.match(/^edge\s+(.+?)\s*->\s*(.+?)\s+(start|end)\s*\(\s*([-+0-9.]+)\s*,\s*([-+0-9.]+)\s*\)\s*$/i);
+    if (an) {
+      const dx = parseFloat(an[4]), dy = parseFloat(an[5]);
+      if (!isNaN(dx) && !isNaN(dy)) out.push({ kind: 'edgeAnchor', from: an[1].trim(), to: an[2].trim(), which: an[3].toLowerCase(), dx, dy });
       continue;
     }
     const m = raw.match(/^(.+?)\s+@\s*\(\s*([-+0-9.]+)\s*,\s*([-+0-9.]+)\s*\)\s*(?:([-0-9.]+)\s+([-0-9.]+))?\s*$/i);

@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ---------------- UI 绑定 ---------------- */
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ---------------- UI 绑定 ---------------- */
 
 const editor = document.getElementById('editor');
 editor.addEventListener('input', renderDebounced);
@@ -100,6 +100,18 @@ function positionBlockFor(model) {
       if (!s) continue;
       lines.push(`${n.id} @ lane ${s.label} (${Math.round(n.x - s.x)}, ${Math.round(n.y - s.y)}) ${Math.round(n.w)} ${Math.round(n.h)}`);
     }
+    // 连线折点：按 <from>-><to> + 沿线序号 round-trip（活动图 from/to 为节点 id，稳定引用）
+    (model.edges || []).forEach(e => {
+      if (e.from == null || e.to == null || !e.bends) return;
+      e.bends.forEach((b, k) => {
+        if (!isFinite(b.x) || !isFinite(b.y)) return;
+        lines.push(`edge ${e.from}->${e.to} bend ${k} @ (${Math.round(b.x)}, ${Math.round(b.y)})`);
+      });
+      if (e.aAnchor && isFinite(e.aAnchor.dx) && isFinite(e.aAnchor.dy))
+        lines.push(`edge ${e.from}->${e.to} start (${Math.round(e.aAnchor.dx)}, ${Math.round(e.aAnchor.dy)})`);
+      if (e.bAnchor && isFinite(e.bAnchor.dx) && isFinite(e.bAnchor.dy))
+        lines.push(`edge ${e.from}->${e.to} end (${Math.round(e.bAnchor.dx)}, ${Math.round(e.bAnchor.dy)})`);
+    });
     return lines.length > 1 ? lines.join('\n') : '';
   }
   // 时序图：导出参与者 / 消息 / 激活 / 组合片段的位置
@@ -122,6 +134,18 @@ function positionBlockFor(model) {
     if (n.kind === 'pseudo') continue;
     lines.push(`${n.label} @ (${Math.round(n.x)}, ${Math.round(n.y)}) ${Math.round(n.w)} ${Math.round(n.h)}`);
   }
+  // 连线折点：按 <from>-><to> + 沿线序号 round-trip（from/to 即节点名，稳定引用）
+  (model.edges || []).forEach(e => {
+    if (e.from == null || e.to == null || !e.bends) return;
+    e.bends.forEach((b, k) => {
+      if (!isFinite(b.x) || !isFinite(b.y)) return;
+      lines.push(`edge ${e.from}->${e.to} bend ${k} @ (${Math.round(b.x)}, ${Math.round(b.y)})`);
+    });
+    if (e.aAnchor && isFinite(e.aAnchor.dx) && isFinite(e.aAnchor.dy))
+      lines.push(`edge ${e.from}->${e.to} start (${Math.round(e.aAnchor.dx)}, ${Math.round(e.aAnchor.dy)})`);
+    if (e.bAnchor && isFinite(e.bAnchor.dx) && isFinite(e.bAnchor.dy))
+      lines.push(`edge ${e.from}->${e.to} end (${Math.round(e.bAnchor.dx)}, ${Math.round(e.bAnchor.dy)})`);
+  });
   if (model.boundary) {
     const b = model.boundary;
     lines.push(`boundary @ (${Math.round(b.x)}, ${Math.round(b.y)}) ${Math.round(b.w)} ${Math.round(b.h)}`);

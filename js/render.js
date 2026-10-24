@@ -1,4 +1,4 @@
-﻿﻿/* ==========================================================================
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ==========================================================================
  *  渲染层
  * ========================================================================== */
 
@@ -88,6 +88,12 @@ function clipPoint(n, tx, ty) {
   const sy = dy !== 0 ? hh / Math.abs(dy) : Infinity;
   const t = Math.min(sx, sy);
   return { x: cx + dx * t, y: cy + dy * t };
+}
+
+// 把任意点投射到元素边框上，返回相对元素中心的边缘偏移 {dx, dy}（连线锚点用）
+function anchorOffset(node, px, py) {
+  const bp = clipPoint(node, px, py);
+  return { dx: bp.x - node.x, dy: bp.y - node.y };
 }
 
 function addArrowHead(g, tip, angle, kind) {
@@ -190,8 +196,8 @@ function drawEdge(g, e, nodeMap, edges) {
   const bends = (e.bends && e.bends.length) ? e.bends.filter(pt => isFinite(pt.x) && isFinite(pt.y)) : null;
   let p1, p2;
   if (bends) {
-    p1 = clipPoint(a, bends[0].x, bends[0].y);
-    p2 = clipPoint(b, bends[bends.length - 1].x, bends[bends.length - 1].y);
+    p1 = e.aAnchor ? { x: a.x + e.aAnchor.dx, y: a.y + e.aAnchor.dy } : clipPoint(a, bends[0].x, bends[0].y);
+    p2 = e.bAnchor ? { x: b.x + e.bAnchor.dx, y: b.y + e.bAnchor.dy } : clipPoint(b, bends[bends.length - 1].x, bends[bends.length - 1].y);
   } else {
     p1 = clipPoint(a, b.x, b.y);
     p2 = clipPoint(b, a.x, a.y);
@@ -289,293 +295,292 @@ function iconBoundary(cx, cyc, R, label) {
 
 /* ---------------- 节点绘制 ---------------- */
 
-function drawNode(g, n, type) {
-  const x = n.x - n.w / 2, y = n.y - n.h / 2;
+/* ================= 节点配色资源（NODE_THEME）================= */
+/* 将各图形散落的颜色/尺寸收敛为可复用的"静态资源"，便于统一修改与复用 */
+const NODE_THEME = {
+  package: {
+    bodyFill: '#fffbeb', bodyEdge: '#f59e0b', gapLine: '#fffbeb',
+    tabFill: '#fde68a', tabEdge: '#f59e0b', seamLine: '#fde68a',
+    edgeFill: '#f59e0b', titleFill: '#92400e', memberFill: '#78350f'
+  },
+  node3d: {
+    dep: 8, headH: 30, topFill: '#d1fae5', sideFill: '#a7f3d0', faceFill: '#ecfdf5',
+    edge: '#10b981', titleFill: '#065f46', memberFill: '#064e3b'
+  },
+  artifact: {
+    fold: 16, headH: 28, faceFill: '#fff7ed', edge: '#f97316',
+    foldFill: '#fed7aa', titleFill: '#9a3412', memberFill: '#7c2d12'
+  },
+  database: {
+    bodyFill: '#f0fdfa', capFill: '#ccfbf1', edge: '#14b8a6', titleFill: '#134e4a'
+  },
+  notice: {
+    fold: 16, faceBg: '#fefce8', edge: '#eab308', shadowFill: '#fef08a',
+    titleFill: '#713f12', memberFill: '#713f12'
+  },
+  component: {
+    headH: 34, bodyFill: '#f5f3ff', headFill: '#ede9fe', edge: '#8b5cf6',
+    iconFill: '#a78bfa', titleFill: '#5b21b6', memberFill: '#4c1d95'
+  },
+  box: {
+    headH: 34, edge: '#94a3b8', erMemberFill: '#1e293b'
+  }
+};
 
-  if (type === 'activity') {
-    if (n.kind === 'start') {
-      g.appendChild(el('circle', { cx: n.x, cy: n.y, r: 12, class: 'act-start' }));
-      return;
+/* ================= 可复用构件 ================= */
+// 横线（带描边色与线宽）
+function lineAt(x1, y1, x2, y2, stroke, sw) {
+  return el('line', { x1, y1, x2, y2, stroke, 'stroke-width': sw });
+}
+// 按行距铺一组成员文本；fill 为空则不写 fill（沿用 CSS class 颜色）
+function memberList(g, x, y, mems, fill, rowH = 18) {
+  (mems || []).forEach((m, i) => {
+    g.appendChild(el('text', { x, y: y + i * rowH, class: 'node-member', fill }, m));
+  });
+}
+
+/* ================= 各图形节点构建器 ================= */
+// 活动图
+function activityNode(g, n, x, y) {
+  if (n.kind === 'start') {
+    g.appendChild(el('circle', { cx: n.x, cy: n.y, r: 12, class: 'act-start' }));
+    return;
+  }
+  if (n.kind === 'stop') {
+    g.appendChild(el('circle', { cx: n.x, cy: n.y, r: 13, class: 'act-stop' }));
+    g.appendChild(el('circle', { cx: n.x, cy: n.y, r: 7, class: 'act-start' }));
+    return;
+  }
+  if (n.kind === 'decision') {
+    g.appendChild(el('polygon', {
+      points: `${n.x},${y} ${x + n.w},${n.y} ${n.x},${y + n.h} ${x},${n.y}`,
+      class: 'act-diamond'
+    }));
+    g.appendChild(el('text', {
+      x: n.x, y: n.y + 4, 'text-anchor': 'middle', class: 'act-text-sm'
+    }, n.label));
+    return;
+  }
+  g.appendChild(el('rect', { x, y, width: n.w, height: n.h, rx: 22, class: 'act-round' }));
+  g.appendChild(el('text', {
+    x: n.x, y: n.y + 5, 'text-anchor': 'middle', class: 'act-text'
+  }, n.label));
+}
+
+// 用例图
+function usecaseNode(g, n, x, y) {
+  if (n.kind === 'actor') {
+    for (const e of actorGlyph(n.x, y + 4, { headR: 11, label: n.label, labelY: n.h + 14 })) {
+      g.appendChild(e);
     }
-    if (n.kind === 'stop') {
-      g.appendChild(el('circle', { cx: n.x, cy: n.y, r: 13, class: 'act-stop' }));
-      g.appendChild(el('circle', { cx: n.x, cy: n.y, r: 7, class: 'act-start' }));
-      return;
-    }
-    if (n.kind === 'decision') {
-      g.appendChild(el('polygon', {
-        points: `${n.x},${y} ${x + n.w},${n.y} ${n.x},${y + n.h} ${x},${n.y}`,
-        class: 'act-diamond'
-      }));
-      g.appendChild(el('text', {
-        x: n.x, y: n.y + 4, 'text-anchor': 'middle', class: 'act-text-sm'
-      }, n.label));
-      return;
-    }
-    g.appendChild(el('rect', { x, y, width: n.w, height: n.h, rx: 22, class: 'act-round' }));
-    g.appendChild(el('text', {
-      x: n.x, y: n.y + 5, 'text-anchor': 'middle', class: 'act-text'
-    }, n.label));
     return;
   }
+  g.appendChild(el('ellipse', { cx: n.x, cy: n.y, rx: n.w / 2, ry: n.h / 2, class: 'usecase-ellipse' }));
+  g.appendChild(el('text', {
+    x: n.x, y: n.y + 5, 'text-anchor': 'middle', class: 'node-title-sm'
+  }, n.label));
+}
 
-  if (type === 'usecase') {
-    if (n.kind === 'actor') {
-      const cx = n.x, top = y + 4;
-      for (const e of actorGlyph(cx, top, { headR: 11, label: n.label, labelY: n.h + 14 })) {
-        g.appendChild(e);
-      }
-      return;
-    }
-    g.appendChild(el('ellipse', { cx: n.x, cy: n.y, rx: n.w / 2, ry: n.h / 2, class: 'usecase-ellipse' }));
-    g.appendChild(el('text', {
-      x: n.x, y: n.y + 5, 'text-anchor': 'middle', class: 'node-title-sm'
-    }, n.label));
+// 状态图
+function stateNode(g, n, x, y) {
+  if (n.shape === 'circle') {
+    g.appendChild(el('circle', { cx: n.x, cy: n.y, r: 11, class: 'state-pseudo' }));
     return;
   }
+  g.appendChild(el('rect', { x, y, width: n.w, height: n.h, rx: 22, class: 'state-round' }));
+  g.appendChild(el('text', {
+    x: n.x, y: n.y + 5, 'text-anchor': 'middle', class: 'node-title-sm'
+  }, n.label));
+}
 
-  if (type === 'state') {
-    if (n.shape === 'circle') {
-      g.appendChild(el('circle', { cx: n.x, cy: n.y, r: 11, class: 'state-pseudo' }));
-      return;
-    }
-    g.appendChild(el('rect', { x, y, width: n.w, height: n.h, rx: 22, class: 'state-round' }));
-    g.appendChild(el('text', {
-      x: n.x, y: n.y + 5, 'text-anchor': 'middle', class: 'node-title-sm'
-    }, n.label));
-    return;
-  }
+// 包图 - Folder 标签样式
+function packageNode(g, n, x, y) {
+  const t = NODE_THEME.package;
+  const tabW = Math.min(textWidth(n.label, 13, '600') + 28, n.w * 0.55);
+  const tabH = 22;
+  // 主体矩形（顶部不设圆角，用细线封住缺口）
+  g.appendChild(el('rect', {
+    x, y: y + tabH, width: n.w, height: n.h - tabH, rx: 5,
+    fill: t.bodyFill, stroke: t.bodyEdge, 'stroke-width': 1.5
+  }));
+  // 左侧缺口遮盖线
+  g.appendChild(lineAt(x, y + tabH + 1, x + 4, y + tabH + 1, t.gapLine, 1.5));
+  // 标签（左上角凸出的矩形）
+  g.appendChild(el('rect', {
+    x, y, width: tabW, height: tabH, rx: 4,
+    fill: t.tabFill, stroke: t.tabEdge, 'stroke-width': 1.5
+  }));
+  // 标签与主体之间的连接（用一条线遮盖接缝）
+  g.appendChild(lineAt(x, y + tabH, x + tabW, y + tabH, t.seamLine, 2));
+  // 主体右边和底边补齐（盖住圆角过渡）
+  g.appendChild(el('rect', {
+    x: x + tabW - 5, y: y + tabH, width: n.w - tabW + 5, height: 1.5,
+    fill: t.edgeFill
+  }));
+  g.appendChild(el('text', {
+    x: x + 12, y: y + tabH - 5, 'text-anchor': 'start', class: 'node-title-sm',
+    fill: t.titleFill
+  }, n.label));
+  // 包内成员显示在主体中
+  memberList(g, x + 14, y + tabH + 22, n.members, t.memberFill);
+}
 
-  /********** 包图 - Folder 标签样式 **********/
-  if (n.kind === 'package') {
-    const tabW = Math.min(textWidth(n.label, 13, '600') + 28, n.w * 0.55);
-    const tabH = 22;
-    // 主体矩形（顶部不设圆角，用细线封住缺口）
-    g.appendChild(el('rect', {
-      x: x, y: y + tabH, width: n.w, height: n.h - tabH, rx: 5,
-      fill: '#fffbeb', stroke: '#f59e0b', 'stroke-width': 1.5
-    }));
-    // 左侧缺口遮盖线
-    g.appendChild(el('line', {
-      x1: x, y1: y + tabH + 1, x2: x + 4, y2: y + tabH + 1,
-      stroke: '#fffbeb', 'stroke-width': 1.5
-    }));
-    // 标签（左上角凸出的矩形）
-    g.appendChild(el('rect', {
-      x, y, width: tabW, height: tabH, rx: 4,
-      fill: '#fde68a', stroke: '#f59e0b', 'stroke-width': 1.5
-    }));
-    // 标签与主体之间的连接（用一条线遮盖接缝）
-    g.appendChild(el('line', {
-      x1: x, y1: y + tabH, x2: x + tabW, y2: y + tabH,
-      stroke: '#fde68a', 'stroke-width': 2
-    }));
-    // 主体右边和底边补齐（盖住圆角过渡）
-    g.appendChild(el('rect', {
-      x: x + tabW - 5, y: y + tabH, width: n.w - tabW + 5, height: 1.5,
-      fill: '#f59e0b'
-    }));
-    g.appendChild(el('text', {
-      x: x + 12, y: y + tabH - 5, 'text-anchor': 'start', class: 'node-title-sm',
-      fill: '#92400e'
-    }, n.label));
+// 部署图 node - 3D 立体盒子
+function deploymentNode(g, n, x, y) {
+  const t = NODE_THEME.node3d;
+  const dep = t.dep;            // 3D 深度
+  const fw = n.w - dep;         // 正面宽度（碰撞区域包含 3D 深度）
+  const fh = n.h - dep;         // 正面高度
+  const headH = t.headH;
+  // 顶面（上侧平行四边形）
+  g.appendChild(el('polygon', {
+    points: `${x + dep},${y + dep} ${x + n.w},${y + dep} ${x + fw},${y} ${x},${y}`,
+    fill: t.topFill, stroke: t.edge, 'stroke-width': 1
+  }));
+  // 右面（右侧平行四边形）
+  g.appendChild(el('polygon', {
+    points: `${x + fw},${y} ${x + n.w},${y + dep} ${x + n.w},${y + n.h} ${x + fw},${y + fh}`,
+    fill: t.sideFill, stroke: t.edge, 'stroke-width': 1
+  }));
+  // 底部面（底部平行四边形）
+  g.appendChild(el('polygon', {
+    points: `${x},${y + fh} ${x + fw},${y + fh} ${x + n.w},${y + n.h} ${x + dep},${y + n.h}`,
+    fill: t.topFill, stroke: t.edge, 'stroke-width': 1
+  }));
+  // 正面（主矩形）
+  g.appendChild(el('polygon', {
+    points: `${x},${y} ${x + fw},${y} ${x + fw},${y + fh} ${x},${y + fh}`,
+    fill: t.faceFill, stroke: t.edge, 'stroke-width': 1.5
+  }));
+  // 标题行
+  g.appendChild(lineAt(x, y + headH, x + fw, y + headH, t.edge, 1));
+  g.appendChild(el('text', {
+    x: n.x - dep / 2, y: y + headH - 9, 'text-anchor': 'middle', class: 'node-title-sm',
+    fill: t.titleFill
+  }, `«node» ${n.label}`));
+  memberList(g, x + 12, y + headH + 18, n.members, t.memberFill);
+}
 
-    // 包内成员显示在主体中
-    (n.members || []).forEach((m, i) => {
-      g.appendChild(el('text', {
-        x: x + 14, y: y + tabH + 22 + i * 18, class: 'node-member',
-        fill: '#78350f'
-      }, m));
-    });
-    return;
-  }
+// artifact - 文档图标样式
+function artifactNode(g, n, x, y) {
+  const t = NODE_THEME.artifact;
+  const { fold, headH } = t;
+  g.appendChild(el('rect', {
+    x, y, width: n.w, height: n.h, rx: 4,
+    fill: t.faceFill, stroke: t.edge, 'stroke-width': 1.5
+  }));
+  // 右上角折角装饰
+  g.appendChild(el('path', {
+    d: `M${x + n.w - fold},${y} L${x + n.w},${y + fold}`,
+    stroke: t.edge, 'stroke-width': 1.5, fill: 'none'
+  }));
+  g.appendChild(el('polygon', {
+    points: `${x + n.w - fold},${y} ${x + n.w},${y} ${x + n.w},${y + fold}`,
+    fill: t.foldFill
+  }));
+  // 标题
+  g.appendChild(el('line', {
+    x1: x + 8, y1: y + headH, x2: x + n.w - 8, y2: y + headH,
+    stroke: t.edge, 'stroke-width': 0.8, 'stroke-dasharray': '4 3'
+  }));
+  g.appendChild(el('text', {
+    x: x + 12, y: y + headH - 7, 'text-anchor': 'start', class: 'node-title-sm',
+    fill: t.titleFill
+  }, `«artifact» ${n.label}`));
+  memberList(g, x + 12, y + headH + 18, n.members, t.memberFill);
+}
 
-  /********** 部署图 node - 3D 立体盒子 **********/
-  if (n.kind === 'node') {
-    const dep = 8; // 3D 深度
-    const fw = n.w - dep; // 正面宽度（碰撞区域包含 3D 深度）
-    const fh = n.h - dep; // 正面高度
-    // 顶面（上侧平行四边形）
-    g.appendChild(el('polygon', {
-      points: `${x + dep},${y + dep} ${x + n.w},${y + dep} ${x + fw},${y} ${x},${y}`,
-      fill: '#d1fae5', stroke: '#10b981', 'stroke-width': 1
-    }));
-    // 右面（右侧平行四边形）
-    g.appendChild(el('polygon', {
-      points: `${x + fw},${y} ${x + n.w},${y + dep} ${x + n.w},${y + n.h} ${x + fw},${y + fh}`,
-      fill: '#a7f3d0', stroke: '#10b981', 'stroke-width': 1
-    }));
-    // 底部面（底部平行四边形）
-    g.appendChild(el('polygon', {
-      points: `${x},${y + fh} ${x + fw},${y + fh} ${x + n.w},${y + n.h} ${x + dep},${y + n.h}`,
-      fill: '#d1fae5', stroke: '#10b981', 'stroke-width': 1
-    }));
-    // 正面（主矩形）
-    g.appendChild(el('polygon', {
-      points: `${x},${y} ${x + fw},${y} ${x + fw},${y + fh} ${x},${y + fh}`,
-      fill: '#ecfdf5', stroke: '#10b981', 'stroke-width': 1.5
-    }));
-    // 标题行
-    const headH = 30;
-    g.appendChild(el('line', {
-      x1: x, y1: y + headH, x2: x + fw, y2: y + headH,
-      stroke: '#10b981', 'stroke-width': 1
-    }));
-    g.appendChild(el('text', {
-      x: n.x - dep / 2, y: y + headH - 9, 'text-anchor': 'middle', class: 'node-title-sm',
-      fill: '#065f46'
-    }, `«node» ${n.label}`));
-    (n.members || []).forEach((m, i) => {
-      g.appendChild(el('text', {
-        x: x + 12, y: y + headH + 18 + i * 18, class: 'node-member',
-        fill: '#064e3b'
-      }, m));
-    });
-    return;
-  }
+// database - 圆柱体
+function databaseNode(g, n, x, y) {
+  const t = NODE_THEME.database;
+  const r = n.w / 2;
+  const cy2 = y + n.h;
+  const cy1 = y + 16;
+  // 主体（四肢路径：矩形 + 底部椭圆露出）
+  g.appendChild(el('path', {
+    d: `M ${x},${cy1} L ${x},${cy2 - 10} A ${r} 10 0 0 0 ${x + n.w},${cy2 - 10} L ${x + n.w},${cy1}`,
+    fill: t.bodyFill, stroke: t.edge, 'stroke-width': 1.5
+  }));
+  // 顶部椭圆
+  g.appendChild(el('ellipse', {
+    cx: n.x, cy: cy1, rx: r, ry: 10,
+    fill: t.capFill, stroke: t.edge, 'stroke-width': 1.5
+  }));
+  // 底部弧线
+  g.appendChild(el('path', {
+    d: `M ${x},${cy2 - 10} A ${r} 10 0 0 0 ${x + n.w},${cy2 - 10}`,
+    fill: 'none', stroke: t.edge, 'stroke-width': 1.5
+  }));
+  // 标题
+  g.appendChild(el('text', {
+    x: n.x, y: cy1 + 3, 'text-anchor': 'middle', class: 'node-title-sm',
+    fill: t.titleFill
+  }, n.label));
+}
 
-  /********** artifact - 文档图标样式 **********/
-  if (n.kind === 'artifact') {
-    g.appendChild(el('rect', {
-      x, y, width: n.w, height: n.h, rx: 4,
-      fill: '#fff7ed', stroke: '#f97316', 'stroke-width': 1.5
-    }));
-    // 右上角折角装饰
-    const fold = 16;
-    g.appendChild(el('path', {
-      d: `M${x + n.w - fold},${y} L${x + n.w},${y + fold}`,
-      stroke: '#f97316', 'stroke-width': 1.5, fill: 'none'
-    }));
-    g.appendChild(el('polygon', {
-      points: `${x + n.w - fold},${y} ${x + n.w},${y} ${x + n.w},${y + fold}`,
-      fill: '#fed7aa'
-    }));
-    // 标题
-    const headH = 28;
-    g.appendChild(el('line', {
-      x1: x + 8, y1: y + headH, x2: x + n.w - 8, y2: y + headH,
-      stroke: '#f97316', 'stroke-width': 0.8, 'stroke-dasharray': '4 3'
-    }));
-    g.appendChild(el('text', {
-      x: x + 12, y: y + headH - 7, 'text-anchor': 'start', class: 'node-title-sm',
-      fill: '#9a3412'
-    }, `«artifact» ${n.label}`));
-    (n.members || []).forEach((m, i) => {
-      g.appendChild(el('text', {
-        x: x + 12, y: y + headH + 18 + i * 18, class: 'node-member',
-        fill: '#7c2d12'
-      }, m));
-    });
-    return;
-  }
+// notice - 便签框（折角）
+function noticeNode(g, n, x, y) {
+  const t = NODE_THEME.notice;
+  const fold = t.fold; // 折角大小
+  g.appendChild(el('polygon', {
+    points: `${x},${y} ${x + n.w - fold},${y} ${x + n.w},${y + fold} ${x + n.w},${y + n.h} ${x},${y + n.h}`,
+    fill: t.faceBg, stroke: t.edge, 'stroke-width': 1.5
+  }));
+  // 折角折痕线
+  g.appendChild(lineAt(x + n.w - fold, y, x + n.w, y + fold, t.edge, 1.5));
+  // 折角阴影三角形
+  g.appendChild(el('polygon', {
+    points: `${x + n.w - fold},${y} ${x + n.w - fold + 4},${y + 4} ${x + n.w},${y + fold}`,
+    fill: t.shadowFill, stroke: 'none', opacity: 0.5
+  }));
+  // 标题与内容
+  g.appendChild(el('text', {
+    x: x + 12, y: y + 18, 'text-anchor': 'start', class: 'node-title-sm',
+    fill: t.titleFill
+  }, n.label));
+  memberList(g, x + 12, y + 40, n.members, t.memberFill); // 首行成员 = 标题 18 + 4 + 18
+}
 
-  /********** database - 圆柱体 **********/
-  if (n.kind === 'database') {
-    const r = n.w / 2;
-    const cy2 = y + n.h;
-    const cy1 = y + 16;
-    // 主体（四肢路径：矩形 + 底部椭圆露出）
-    g.appendChild(el('path', {
-      d: `M ${x},${cy1} L ${x},${cy2 - 10} A ${r} 10 0 0 0 ${x + n.w},${cy2 - 10} L ${x + n.w},${cy1}`,
-      fill: '#f0fdfa', stroke: '#14b8a6', 'stroke-width': 1.5
-    }));
-    // 顶部椭圆
-    g.appendChild(el('ellipse', {
-      cx: n.x, cy: cy1, rx: r, ry: 10,
-      fill: '#ccfbf1', stroke: '#14b8a6', 'stroke-width': 1.5
-    }));
-    // 底部弧线
-    g.appendChild(el('path', {
-      d: `M ${x},${cy2 - 10} A ${r} 10 0 0 0 ${x + n.w},${cy2 - 10}`,
-      fill: 'none', stroke: '#14b8a6', 'stroke-width': 1.5
-    }));
-    // 标题
-    g.appendChild(el('text', {
-      x: n.x, y: cy1 + 3, 'text-anchor': 'middle', class: 'node-title-sm',
-      fill: '#134e4a'
-    }, n.label));
-    return;
-  }
+// component - 带组件图标的标题栏
+function componentNode(g, n, x, y) {
+  const t = NODE_THEME.component;
+  const headH = t.headH;
+  const iconX = x + 10, iconY = y + 7;
+  g.appendChild(el('rect', {
+    x, y, width: n.w, height: n.h, rx: 6,
+    fill: t.bodyFill, stroke: t.edge, 'stroke-width': 1.5
+  }));
+  g.appendChild(el('rect', {
+    x, y, width: n.w, height: headH,
+    fill: t.headFill, stroke: t.edge, 'stroke-width': 1.5
+  }));
+  g.appendChild(el('rect', {
+    x, y: y + headH - 8, width: n.w, height: 8,
+    fill: t.headFill, stroke: 'none'
+  }));
+  g.appendChild(lineAt(x, y + headH, x + n.w, y + headH, t.edge, 1));
+  // 组件小图标（两个小矩形在左侧）
+  g.appendChild(el('rect', {
+    x: iconX, y: iconY, width: 8, height: 8, rx: 1.5,
+    fill: t.iconFill, stroke: 'none'
+  }));
+  g.appendChild(el('rect', {
+    x: iconX, y: iconY + 10, width: 8, height: 8, rx: 1.5,
+    fill: t.iconFill, stroke: 'none'
+  }));
+  // 标题
+  g.appendChild(el('text', {
+    x: iconX + 18, y: y + 22, 'text-anchor': 'start', class: 'node-title',
+    fill: t.titleFill
+  }, n.label));
+  // 成员
+  memberList(g, x + 12, y + headH + 20, n.members, t.memberFill);
+}
 
-  /********** notice - 便签框（折角） **********/
-  if (n.kind === 'notice') {
-    const F = 16; // 折角大小
-    g.appendChild(el('polygon', {
-      points: `${x},${y} ${x + n.w - F},${y} ${x + n.w},${y + F} ${x + n.w},${y + n.h} ${x},${y + n.h}`,
-      fill: '#fefce8', stroke: '#eab308', 'stroke-width': 1.5
-    }));
-    // 折角折痕线
-    g.appendChild(el('line', {
-      x1: x + n.w - F, y1: y, x2: x + n.w, y2: y + F,
-      stroke: '#eab308', 'stroke-width': 1.5
-    }));
-    // 折角阴影三角形
-    g.appendChild(el('polygon', {
-      points: `${x + n.w - F},${y} ${x + n.w - F + 4},${y + 4} ${x + n.w},${y + F}`,
-      fill: '#fef08a', stroke: 'none', opacity: 0.5
-    }));
-    // 标题与内容
-    let contentY = y + 18;
-    g.appendChild(el('text', {
-      x: x + 12, y: contentY, 'text-anchor': 'start', class: 'node-title-sm',
-      fill: '#713f12'
-    }, n.label));
-    contentY += 4;
-    (n.members || []).forEach((m, i) => {
-      g.appendChild(el('text', {
-        x: x + 12, y: contentY + 18 + i * 18, class: 'node-member',
-        fill: '#713f12'
-      }, m));
-    });
-    return;
-  }
-
-  /********** component - 带组件图标的标题栏 **********/
-  if (n.kind === 'component') {
-    const headH = 34;
-    g.appendChild(el('rect', {
-      x, y, width: n.w, height: n.h, rx: 6,
-      fill: '#f5f3ff', stroke: '#8b5cf6', 'stroke-width': 1.5
-    }));
-    g.appendChild(el('rect', {
-      x, y, width: n.w, height: headH,
-      fill: '#ede9fe', stroke: '#8b5cf6', 'stroke-width': 1.5
-    }));
-    g.appendChild(el('rect', {
-      x, y: y + headH - 8, width: n.w, height: 8,
-      fill: '#ede9fe', stroke: 'none'
-    }));
-    g.appendChild(el('line', {
-      x1: x, y1: y + headH, x2: x + n.w, y2: y + headH,
-      stroke: '#8b5cf6', 'stroke-width': 1
-    }));
-    // 组件小图标（两个小矩形在左侧）
-    const iconX = x + 10, iconY = y + 7;
-    g.appendChild(el('rect', {
-      x: iconX, y: iconY, width: 8, height: 8, rx: 1.5,
-      fill: '#a78bfa', stroke: 'none'
-    }));
-    g.appendChild(el('rect', {
-      x: iconX, y: iconY + 10, width: 8, height: 8, rx: 1.5,
-      fill: '#a78bfa', stroke: 'none'
-    }));
-    // 标题
-    g.appendChild(el('text', {
-      x: iconX + 18, y: y + 22, 'text-anchor': 'start', class: 'node-title',
-      fill: '#5b21b6'
-    }, n.label));
-    // 成员
-    (n.members || []).forEach((m, i) => {
-      g.appendChild(el('text', {
-        x: x + 12, y: y + headH + 20 + i * 18, class: 'node-member',
-        fill: '#4c1d95'
-      }, m));
-    });
-    return;
-  }
-
-  /********** 默认矩形框（类图等）- 包含属性和方法分栏 **********/
-  const headH = 34;
+// 默认矩形框（类图等）- 包含属性和方法分栏
+function defaultBoxNode(g, n, x, y, type) {
+  const t = NODE_THEME.box;
+  const headH = t.headH;
   const kw = n.kind === 'abstract' ? '«abstract» ' : '';
 
   g.appendChild(el('rect', {
@@ -586,14 +591,7 @@ function drawNode(g, n, type) {
     x, y, width: n.w, height: headH,
     class: 'node-header'
   }));
-  // g.appendChild(el('rect', {
-  //   x, y: y + headH - 7, width: n.w, height: 7,
-  //   class: 'node-header', stroke: 'none'
-  // }));
-  g.appendChild(el('line', {
-    x1: x, y1: y + headH , x2: x + n.w, y2: y + headH,
-    stroke: '#94a3b8', 'stroke-width': 1
-  }));
+  g.appendChild(lineAt(x, y + headH, x + n.w, y + headH, t.edge, 1));
 
   g.appendChild(el('text', {
     x: n.x, y: y + 22, 'text-anchor': 'middle', class: 'node-title'
@@ -603,12 +601,7 @@ function drawNode(g, n, type) {
 
   // E-R 图实体：字段含 VARCHAR(200)、DECIMAL(10,2) 等括号内容，不做属性/方法分栏
   if (type === 'er') {
-    for (let i = 0; i < mems.length; i++) {
-      g.appendChild(el('text', {
-        x: x + 12, y: y + headH + 20 + i * 20, class: 'node-member',
-        fill: '#1e293b'
-      }, mems[i]));
-    }
+    memberList(g, x + 12, y + headH + 20, mems, t.erMemberFill, 20);
     return;
   }
 
@@ -629,10 +622,7 @@ function drawNode(g, n, type) {
   // 属性和方法之间的分隔线
   if (n._hasSep) {
     const sy = y + sepY + n._attrCount * 18 + 4;
-    g.appendChild(el('line', {
-      x1: x , y1: sy - 8, x2: x + n.w, y2: sy - 8,
-      stroke: '#94a3b8', 'stroke-width': 2
-    }));
+    g.appendChild(lineAt(x, sy - 8, x + n.w, sy - 8, t.edge, 2));
   }
 
   for (const m of mems) {
@@ -646,6 +636,26 @@ function drawNode(g, n, type) {
       methIdx++;
     }
   }
+}
+
+/* ================= kind → 渲染器 注册表 ================= */
+const NODE_RENDERERS = {
+  package: packageNode,
+  node: deploymentNode,
+  artifact: artifactNode,
+  database: databaseNode,
+  notice: noticeNode,
+  component: componentNode,
+};
+
+function drawNode(g, n, type) {
+  const x = n.x - n.w / 2, y = n.y - n.h / 2;
+  if (type === 'activity') return activityNode(g, n, x, y);
+  if (type === 'usecase') return usecaseNode(g, n, x, y);
+  if (type === 'state') return stateNode(g, n, x, y);
+  const r = NODE_RENDERERS[n.kind];
+  if (r) return r(g, n, x, y);
+  return defaultBoxNode(g, n, x, y, type);
 }
 
 /* ---------------- 内容构建 ---------------- */
@@ -740,22 +750,26 @@ function renderActivityContainers(root, model) {
   }
 }
 
-/* 容器四角大小调整命中区（透明不可见，拖拽四角调整大小） */
-function addContainerHandles(box, ctype, cidx, obj) {
-  const HS = 18;
-  const corners = [
-    ['nw', obj.x,            obj.y,              'nwse-resize'],
-    ['ne', obj.x + obj.w,    obj.y,              'nesw-resize'],
-    ['sw', obj.x,            obj.y + obj.h,      'nesw-resize'],
-    ['se', obj.x + obj.w,    obj.y + obj.h,      'nwse-resize']
-  ];
-  for (const [corner, cx, cy, cur] of corners) {
-    box.appendChild(el('rect', {
+/* 通用四角大小调整命中区（透明不可见，拖拽四角调整大小）
+   box: {x,y,w,h}；buildAttrs(corner, cursor) 返回该角要附加的 data 属性 */
+function addCorners(g, box, HS, buildAttrs) {
+  const cur = { nw: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize', se: 'nwse-resize' };
+  for (const corner of ['nw', 'ne', 'sw', 'se']) {
+    const cx = corner[1] === 'e' ? box.x + box.w : box.x;
+    const cy = corner[0] === 's' ? box.y + box.h : box.y;
+    g.appendChild(el('rect', {
       x: cx - HS / 2, y: cy - HS / 2, width: HS, height: HS, rx: 3,
       fill: 'rgba(0,0,0,0)', 'pointer-events': 'all',
-      'data-ctype': ctype, 'data-cidx': cidx, 'data-corner': corner, cursor: cur
+      ...buildAttrs(corner, cur[corner])
     }));
   }
+}
+
+/* 容器四角大小调整命中区（透明不可见，拖拽四角调整大小） */
+function addContainerHandles(box, ctype, cidx, obj) {
+  addCorners(box, obj, 18, (corner, cursor) => ({
+    'data-ctype': ctype, 'data-cidx': cidx, 'data-corner': corner, cursor
+  }));
 }
 
 function buildGraphContent(model) {
@@ -781,20 +795,7 @@ function buildGraphContent(model) {
     }, b.label));
 
     // 四角大小调整命中区（透明不可见，鼠标移至边界四角处可拖拽调整大小）
-    const HS = 18;
-    const corners = [
-      ['nw', b.x,            b.y,            'nwse-resize'],
-      ['ne', b.x + b.w,      b.y,            'nesw-resize'],
-      ['sw', b.x,            b.y + b.h,      'nesw-resize'],
-      ['se', b.x + b.w,      b.y + b.h,      'nwse-resize']
-    ];
-    for (const [corner, cx, cy, cur] of corners) {
-      root.appendChild(el('rect', {
-        x: cx - HS / 2, y: cy - HS / 2, width: HS, height: HS, rx: 3,
-        fill: 'rgba(0,0,0,0)', 'pointer-events': 'all',
-        'data-boundary-handle': corner, cursor: cur
-      }));
-    }
+    addCorners(root, b, 18, (corner, cursor) => ({ 'data-boundary-handle': corner, cursor }));
   }
 
   // 活动图容器：泳道（渲染在最底层）+ 活动边
@@ -804,6 +805,7 @@ function buildGraphContent(model) {
 
   const gEdges = el('g');
   const gNodes = el('g');
+  const gHandles = el('g'); // 置顶：连线端点锚点，须盖在节点命中区之上才能被点中
   root.appendChild(gEdges);
   root.appendChild(gNodes);
 
@@ -820,6 +822,21 @@ function buildGraphContent(model) {
           fill: 'rgba(0,0,0,0)', 'pointer-events': 'all',
           'data-bend-edge': i, 'data-bend-idx': k, cursor: 'move'
         }));
+      }
+      // 端点锚点命中区：存在折点时连接点可沿元素边缘自由拖动
+      const ndA = nodeMap.get(e.from), ndB = nodeMap.get(e.to);
+      if (ndA && ndB && ndA !== ndB) {
+        const bfn = e.bends.filter(pt => isFinite(pt.x) && isFinite(pt.y));
+        const ep1 = e.aAnchor ? { x: ndA.x + e.aAnchor.dx, y: ndA.y + e.aAnchor.dy } : clipPoint(ndA, bfn[0].x, bfn[0].y);
+        const ep2 = e.bAnchor ? { x: ndB.x + e.bAnchor.dx, y: ndB.y + e.bAnchor.dy } : clipPoint(ndB, bfn[bfn.length - 1].x, bfn[bfn.length - 1].y);
+        // 锚点命中区（透明不可见，与折点一致）：置于最上层，鼠标移上呈移动光标可沿边框拖拽
+        const anchorDot = (pt, which) => el('circle', {
+          cx: pt.x, cy: pt.y, r: 6,
+          fill: 'rgba(0,0,0,0)', 'pointer-events': 'all',
+          'data-anchor-edge': i, 'data-anchor-end': which, cursor: 'move'
+        });
+        gHandles.appendChild(anchorDot(ep1, 'start'));
+        gHandles.appendChild(anchorDot(ep2, 'end'));
       }
     }
   }
@@ -845,6 +862,9 @@ function buildGraphContent(model) {
       x: model.titleX, y: model.titleY, 'text-anchor': 'middle', class: 'title-text'
     }, model.title));
   }
+
+  // 端点锚点置顶，避免被节点命中区遮住
+  root.appendChild(gHandles);
 
   return root;
 }
@@ -1023,20 +1043,9 @@ function buildSequenceContent(model) {
       if (lbl) fg.appendChild(el('text', { x: f.x + 6, y: sy - 5, class: 'seq-frag-sep-text' }, '[' + lbl + ']'));
     }
     // 四角大小调整命中区（透明，拖拽四角调整组合片段大小）
-    const HS = 14;
-    const corns = [
-      ['nw', f.x,         f.y,         'nwse-resize'],
-      ['ne', f.x + f.w,   f.y,         'nesw-resize'],
-      ['sw', f.x,         f.y + f.h,   'nesw-resize'],
-      ['se', f.x + f.w,   f.y + f.h,   'nwse-resize']
-    ];
-    for (const [corner, cx, cy, cur] of corns) {
-      fg.appendChild(el('rect', {
-        x: cx - HS / 2, y: cy - HS / 2, width: HS, height: HS, rx: 3,
-        fill: 'rgba(0,0,0,0)', 'pointer-events': 'all',
-        'data-ctype': 'seqFrag', 'data-cidx': i, 'data-corner': corner, cursor: cur
-      }));
-    }
+    addCorners(fg, f, 14, (corner, cursor) => ({
+      'data-ctype': 'seqFrag', 'data-cidx': i, 'data-corner': corner, cursor
+    }));
     fragG.appendChild(fg);
   }
   g.appendChild(fragG);
