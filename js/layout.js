@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ==========================================================================
+﻿/* ==========================================================================
  *  布局层
  * ========================================================================== */
 
@@ -6,7 +6,7 @@ function prepareNodes(model) {
   const { type, nodes } = model;
   for (const n of nodes) {
     if (type === 'usecase') {
-      if (n.kind === 'actor') {
+      if (n.kind === 'actor' || n.kind === 'businessactor') {
         n.shape = 'actor'; n.w = 46; n.h = 76;
       } else {
         n.shape = 'ellipse';
@@ -521,14 +521,14 @@ function layoutSequence(model) {
   const PAD = 44, GAP = 64;
   const TOP = 24;
   const titleH = model.title ? 48 : 0;
-  const BOX_H = 64;
+  const BOX_H = 96;
   const HEAD_TOP = TOP + titleH;
 
   // 参与者 X 坐标（LifeLine 中心）与头部框
   let x = PAD;
   for (const p of model.participants) {
     const iconW = p.kind === 'object' ? 6 : 26;
-    p.w = Math.max(textWidth(p.label, 13, '600') + iconW + 42, 112);
+    p.w = Math.max(textWidth(p.label, 13, '600') + iconW * 1.5 + 42, 140);
     p.h = BOX_H;
     p.x = x + p.w / 2;
     p.y = HEAD_TOP + BOX_H / 2;

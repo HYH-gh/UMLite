@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UMLite · 元素测试页</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+  html, body { margin: 0; }
+  body { background: #f1f5f9; padding: 12px; overflow-y: auto; }
+  #wrap { display: flex; flex-wrap: wrap; gap: 12px; }
+  figure { box-sizing: border-box; 
+    width: var(--fig-width, 200px);   /* 默认 200px */
+    height: var(--fig-height, 168px); /* 默认 168px */
+    margin: 0; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,.05); padding: 6px; display: flex; align-items: center; justify-content: center; }
+  figure svg { width: 100%; height: 100%; display: block; }
+</style>
+</head>
+<body>
+
+<div style="margin-bottom: 12px; display: flex;align-items: center; gap: 12px;position: sticky;top: 0;">
+    <label for="zoomSlider">等比缩放:</label>
+    <input type="range" id="zoomSlider" min="100" max="400" value="200" step="10">
+    <span id="zoomValue">200 x 168</span>
+</div>
+
+<div id="wrap"></div>
+
+<script src="js/util.js"></script>
+<script src="js/parser.js"></script>
+<script src="js/layout.js"></script>
+<script src="js/render.js"></script>
+<script>
+    (function() {
+      const slider = document.getElementById('zoomSlider');
+      const valueDisplay = document.getElementById('zoomValue');
+      const wrap = document.getElementById('wrap');
+      const BASE_HEIGHT = 168;
+      const BASE_WIDTH = 200;
+      const RATIO = BASE_HEIGHT / BASE_WIDTH; // 计算比例 0.84
+      slider.addEventListener('input', (e) => {
+        const newWidth = parseInt(e.target.value, 10);
+        const newHeight = Math.round(newWidth * RATIO); // 保持等比缩放，并取整
+        // 更新 CSS 变量
+        wrap.style.setProperty('--fig-width', `${newWidth}px`);
+        wrap.style.setProperty('--fig-height', `${newHeight}px`);
+        // 更新显示文字
+        valueDisplay.textContent = `${newWidth} x ${newHeight}`;
+      });
+    })();
+  </script>
+<script>
+(function () {
+  'use strict';
+
+  /* ---- 复刻 view.js render() 中的布局分支：parse → layout → apply ---- */
+  function buildModel(src) {
+    const model = parseDSL(src);
+    prepareNodes(model);
+
+    if (model.type === 'sequence') {
+      const dims = layoutSequence(model);
+      model.contentW = dims.width;
+      model.contentH = dims.height;
+    } else {
+      if (model.type === 'activity' || model.type === 'state') {
+        layoutActivity(model);
+        resolveOverlaps(model.nodes, model.type === 'activity' ? 44 : 42,
+          model.type === 'activity' ? 36 : 32);
+      } else if (model.type === 'usecase' && model.boundary) {
+        const insideNodes = model.nodes.filter(n => n.insideBoundary);
+        if (insideNodes.length) {
+          const subModel = { ...model, nodes: insideNodes };
+          layoutForce(subModel);
+          resolveOverlaps(subModel.nodes, 64, 52);
+        }
+      } else {
+        layoutForce(model);
+      }
+      normalizeToOrigin(model);
+    }
+
+    if (model.type === 'activity') layoutActivityContainers(model);
+    applyLayout(model);
+    return model;
+  }
+
+  /* ---- 把一段最小 DSL 渲染成一张独立小画布（自动按内容适配 viewBox） ---- */
+  function addCard(src, hint) {
+    const svg = el('svg', { xmlns: SVG_NS, width: 210, height: 150 });
+    let vp = null;
+    const fig = document.createElement('figure');
+    fig.title = hint || '';
+    try {
+      const model = buildModel(src);
+      const content = model.type === 'sequence'
+        ? buildSequenceContent(model)
+        : buildGraphContent(model);
+      vp = el('g', {});
+      vp.appendChild(content);
+      svg.appendChild(styleEl(svgStyle()));
+      svg.appendChild(vp);
+    } catch (err) {
+      svg.appendChild(styleEl(svgStyle()));
+      svg.appendChild(el('text', { x: 10, y: 24, fill: '#dc2626' }, '✗ ' + err.message));
+    }
+    fig.appendChild(svg);
+    document.getElementById('wrap').appendChild(fig);
+    if (!vp) return;
+    try {
+      const b = vp.getBBox();
+      const pad = 26;
+      svg.setAttribute('viewBox',
+        (b.x - pad) + ' ' + (b.y - pad) + ' ' + (b.width + pad * 2) + ' ' + (b.height + pad * 2));
+    } catch (e) { /* 解析失败时保持默认尺寸 */ }
+  }
+
+  /* ================= 最小元素清单：后续新增元素在此追加一段 DSL 即可 ================= */
+  const cases = [
+
+    // ---------- 类图 · 盒形元素 ----------
+    ['类 · 空', `
+@diagram class
+class A
+`],
+    ['类 · 仅属性', `
+@diagram class
+class A {
+  - name: String
+  + id: Int
+}
+`],
+    ['类 · 属性+方法（分隔线）', `
+@diagram class
+class A {
+  - name
+  + getName(): String
+  + setName(n: String): void
+}
+`],
+    ['抽象类', `
+@diagram class
+abstract class Base {
+  + get(): void
+}
+`],
+    ['接口', `
+@diagram class
+interface Payable {
+  + pay(): void
+}
+`],
+    ['枚举', `
+@diagram class
+enum Status {
+  READY
+  PAUSED
+  DONE
+}
+`],
+
+    // ---------- 用例图 : 小人 / 椭圆 / 边界 ----------
+    ['用例 · 角色（小人）', `
+@diagram usecase
+actor 用户
+`],
+    ['用例 · 椭圆', `
+@diagram usecase
+usecase 登录系统
+`],
+    ['用例 · 边界（实线）', `
+@diagram usecase
+boundary "系统" :solid
+usecase 登录 :boundary
+`],
+    ['用例 · 边界（虚线）', `
+@diagram usecase
+boundary "系统" :dashed
+usecase 登录 :boundary
+`],
+    // ---------- 业务用例模型元素（business 前缀）----------
+    ['业务用例 · 角色（小人）', `
+@diagram usecase
+business actor 贵宾顾客
+`],
+    ['业务用例 · 用例（椭圆）', `
+@diagram usecase
+business usecase 会员下单
+`],
+
+    // ---------- 活动图 : 原子节点 ----------
+    ['活动 · 开始', `
+@diagram activity
+start
+`],
+    ['活动 · 结束', `
+@diagram activity
+stop
+`],
+    ['活动 · 动作', `
+@diagram activity
+:处理申请;
+`],
+    ['活动 · 判定（菱形）', `
+@diagram activity
+if (库存是否充足?)
+  :是; 
+endif
+`],
+    ['活动 · 循环（while）', `
+@diagram activity
+while (还有下一页?)
+  :读取一页;
+endwhile
+`],
+    ['活动 · 备注', `
+@diagram activity
+note: 补充说明
+`],
+    ['活动 · 水平泳道', `
+@diagram activity
+swimlane "用户" :h
+:提交; in "用户"
+`],
+    ['活动 · 垂直泳道', `
+@diagram activity
+swimlane "系统" :v
+:处理; in "系统"
+`],
+
+    // ---------- 状态图 ----------
+    ['状态 · 初始', `
+@diagram state
+[*] --> A
+`],
+    ['状态 · 终止', `
+@diagram state
+A --> [*]
+`],
+    ['状态 · 普通状态', `
+@diagram state
+A --> B
+`],
+
+    // ---------- 其他盒形元素 ----------
+    ['组件', `
+@diagram component
+component 网关 {
+  + 鉴权
+}
+`],
+    ['部署节点', `
+@diagram deployment
+node 应用服务器 {
+  artifact app.jar
+}
+`],
+    ['构件（artifact）', `
+@diagram deployment
+artifact app.jar
+`],
+    ['数据库', `
+@diagram deployment
+database MySQL
+`],
+    ['对象（对象图）', `
+@diagram object
+object 用户张三 {
+  id = "U1001"
+  name = "张三"
+}
+`],
+    ['包', `
+@diagram package
+package 业务层 {
+  class Service
+}
+`],
+    ['E-R 实体', `
+@diagram er
+entity 用户 {
+  * id: BIGINT
+  name: VARCHAR(50)
+}
+`],
+
+    // ---------- 时序图 : 参与者 ----------
+    ['时序 · 对象', `
+@diagram sequence
+object 网关
+`],
+    ['时序 · 角色', `
+@diagram sequence
+actor 用户
+`],
+    ['时序 · 控制类', `
+@diagram sequence
+control 认证服务
+`],
+    ['时序 · 实体类', `
+@diagram sequence
+entity 数据库
+`],
+    ['时序 · 边界类', `
+@diagram sequence
+boundary 浏览器
+`],
+    // ---------- 业务顺序模型元素（business 前缀）----------
+    ['业务 · 边界对象', `
+@diagram sequence
+business boundary 门店界面
+`],
+    ['业务 · 控制对象', `
+@diagram sequence
+business control 订单控制
+`],
+    ['业务 · 实体对象', `
+@diagram sequence
+business entity 订单实体
+`],
+    ['业务 · 业务工人', `
+@diagram sequence
+business worker 仓管员
+`],
+    // ---------- 时序图 · 消息 ----------
+    ['时序 · 激活条', `
+@diagram sequence
+object A
+object B
+A -> B : 调用
+activate A
+deactivate A
+`],
+    ['时序 · 组合片段', `
+@diagram sequence
+object A
+object B
+alt 校验通过
+  A -> B : 分支1
+end
+`],
+
+    // ---------- 类图连线 · 逐一展示线型 ----------
+    ['连线 · 实线无箭头（--）', `
+@diagram class
+A
+B
+A -- B
+@layout
+A @ (70, 70) 60 40
+B @ (240, 70) 60 40
+`],
+    ['连线 · 实线箭头（-->）', `
+@diagram class
+A
+B
+A --> B
+@layout
+A @ (70, 70) 60 40
+B @ (240, 70) 60 40
+`],
+    ['连线 · 虚线无箭头（..）', `
+@diagram class
+A
+B
+A .. B
+@layout
+A @ (70, 70) 60 40
+B @ (240, 70) 60 40
+`],
+    ['连线 · 虚线箭头/依赖（..>）', `
+@diagram class
+A
+B
+A ..> B
+@layout
+A @ (70, 70) 60 40
+B @ (240, 70) 60 40
+`],
+    ['连线 · 实线空心三角/继承（--|>）', `
+@diagram class
+A
+B
+A --|> B
+@layout
+A @ (70, 70) 60 40
+B @ (240, 70) 60 40
+`],
+    ['连线 · 虚线空心三角/实现（..|>）', `
+@diagram class
+A
+B
+A ..|> B
+@layout
+A @ (70, 70) 60 40
+B @ (240, 70) 60 40
+`],
+    ['连线 · 实心菱形/组合（*--）', `
+@diagram class
+A
+B
+A *-- B
+@layout
+A @ (70, 70) 60 40
+B @ (240, 70) 60 40
+`],
+    ['连线 · 空心菱形/聚合（o--）', `
+@diagram class
+A
+B
+A o-- B
+@layout
+A @ (70, 70) 60 40
+B @ (240, 70) 60 40
+`],
+    ['连线 · 折线（折点）', `
+@diagram class
+A
+B
+A --> B
+@layout
+A @ (60, 90) 56 40
+B @ (280, 90) 56 40
+edge A->B bend 0 @ (180, 40)
+edge A->B bend 1 @ (180, 160)
+`],
+
+    // ---------- 时序消息 · 逐一展示箭头 ----------
+    ['消息 · 简单箭头（->）', `
+@diagram sequence
+object A
+object B
+A -> B : msg
+`],
+    ['消息 · 同步实心（->>）', `
+@diagram sequence
+object A
+object B
+A ->> B : msg
+`],
+    ['消息 · 异步（->o）', `
+@diagram sequence
+object A
+object B
+A ->o B : msg
+`],
+    ['消息 · 返回虚线（-->）', `
+@diagram sequence
+object A
+object B
+A --> B : msg
+`],
+    ['消息 · 创建（->*）', `
+@diagram sequence
+object A
+object B
+A ->* B : msg
+`],
+    ['消息 · 反身（-> 自身）', `
+@diagram sequence
+object A
+A -> A : msg
+`]
+  ];
+
+  cases.forEach(function (c) { addCard(c[1], c[0]); });
+})();
+</script>
+</body>
+</html>

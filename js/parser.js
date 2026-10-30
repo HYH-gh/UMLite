@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ---------------- 解析层 ---------------- */
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ---------------- 解析层 ---------------- */
 
 const DIAGRAM_ALIASES = {
   class: 'class', classdiagram: 'class', '类图': 'class',
@@ -121,7 +121,7 @@ function parseEdgeLine(text) {
 
 /* -------- 类图 / ER / 状态 / 组件 / 部署 / 对象 / 包 / 用例 -------- */
 
-const DECL_RE = /^(abstract\s+class|class|interface|enum|struct|annotation|trait|entity|component|node|artifact|object|package|state|actor|usecase|database|table|boundary|notice)\b(.*)$/i;
+const DECL_RE = /^((?:business\s+)?(?:abstract\s+class|class|interface|enum|struct|annotation|trait|entity|component|node|artifact|object|package|state|actor|usecase|database|table|boundary|notice))\b(.*)$/i;
 
 function parseClassLike(lines, type) {
   const nodes = new Map();
@@ -364,7 +364,7 @@ const SEQ_OPS = [
   { op: '-->', kind: 'return', dash: true,  fill: false }, // 返回消息：虚线开放箭头
   { op: '->',  kind: 'simple', dash: false, fill: false }, // 简单消息：实线开放箭头
 ];
-const SEQ_PART_KINDS = ['actor', 'object', 'control', 'entity', 'boundary'];
+const SEQ_PART_KINDS = ['actor', 'object', 'control', 'entity', 'boundary', 'worker'];
 
 function parseSequence(lines) {
   const participants = [];
@@ -395,9 +395,10 @@ function parseSequence(lines) {
   for (const { text } of lines) {
     let m;
     // 1. 参与者声明（角色 / 对象 / 控制类 / 实体类 / 边界类）
-    if ((m = text.match(/^(actor|object|control|entity|boundary|participant)\s+(.+)$/i))) {
-      const kind = m[1].toLowerCase() === 'participant' ? 'object' : m[1].toLowerCase();
-      let rest = m[2].trim();
+    if ((m = text.match(/^(?:(business)\s+)?(actor|object|control|entity|boundary|worker|participant)\s+(.+)$/i))) {
+      const base = m[2].toLowerCase() === 'participant' ? 'object' : m[2].toLowerCase();
+      const kind = m[1] ? 'bus' + base : base;
+      let rest = m[3].trim();
       const am = rest.match(/^(.+?)\s+as\s+(\S+)$/i);
       let ref, label;
       if (am) { label = readToken(am[1])[0]; ref = am[2].trim(); }

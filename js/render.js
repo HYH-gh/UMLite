@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ==========================================================================
+﻿﻿﻿/* ==========================================================================
  *  渲染层
  * ========================================================================== */
 
@@ -338,6 +338,10 @@ function memberList(g, x, y, mems, fill, rowH = 18) {
     g.appendChild(el('text', { x, y: y + i * rowH, class: 'node-member', fill }, m));
   });
 }
+// 业务元素标记：与主体同色的实线斜杠，方向从左下到右上（区分普通模型与业务模型，复用于各图形）
+function bizSlash(x1, y1, x2, y2, color, weight = 2.2) {
+  return el('line', { x1, y1, x2, y2, stroke: color || '#475569', 'stroke-width': weight});
+}
 
 /* ================= 各图形节点构建器 ================= */
 // 活动图
@@ -369,9 +373,12 @@ function activityNode(g, n, x, y) {
 
 // 用例图
 function usecaseNode(g, n, x, y) {
-  if (n.kind === 'actor') {
+  if (n.kind === 'actor' || n.kind === 'businessactor') {
     for (const e of actorGlyph(n.x, y + 4, { headR: 11, label: n.label, labelY: n.h + 14 })) {
       g.appendChild(e);
+    }
+    if (n.kind === 'businessactor') {
+      g.appendChild(bizSlash(n.x - 2, y + 26, n.x + 10, y + 10, '#334155', 2));
     }
     return;
   }
@@ -379,6 +386,9 @@ function usecaseNode(g, n, x, y) {
   g.appendChild(el('text', {
     x: n.x, y: n.y + 5, 'text-anchor': 'middle', class: 'node-title-sm'
   }, n.label));
+  if (n.kind === 'businessusecase') {
+    g.appendChild(bizSlash(n.x - n.w / 2 * 0.1, n.y + n.h / 2, n.x + n.w / 2 , n.y - n.h / 2 * 0.1, '#8b5cf6', 1.5));
+  }
 }
 
 // 状态图
@@ -581,7 +591,8 @@ function componentNode(g, n, x, y) {
 function defaultBoxNode(g, n, x, y, type) {
   const t = NODE_THEME.box;
   const headH = t.headH;
-  const kw = n.kind === 'abstract' ? '«abstract» ' : '';
+  const kwMap = { abstract: '«abstract»\n ', interface: '«interface» ', enum: '«enum» ' };
+  const kw = kwMap[n.kind] || '';
 
   g.appendChild(el('rect', {
     x, y, width: n.w, height: n.h, rx: 6,
@@ -593,9 +604,20 @@ function defaultBoxNode(g, n, x, y, type) {
   }));
   g.appendChild(lineAt(x, y + headH, x + n.w, y + headH, t.edge, 1));
 
-  g.appendChild(el('text', {
-    x: n.x, y: y + 22, 'text-anchor': 'middle', class: 'node-title'
-  }, kw + n.label));
+  if (kw) {
+    // 两行标题：第一行「标识」，第二行「类名」
+    g.appendChild(el('text', {
+      x: n.x, y: y + 16, 'text-anchor': 'middle', 'font-size': 11,
+      class: 'node-title', fill: t.memberFill
+    }, kw.trim()));
+    g.appendChild(el('text', {
+      x: n.x, y: y + 31, 'text-anchor': 'middle', class: 'node-title'
+    }, n.label));
+  } else {
+    g.appendChild(el('text', {
+      x: n.x, y: y + 22, 'text-anchor': 'middle', class: 'node-title'
+    }, n.label));
+  }
 
   const mems = n.members || [];
 
@@ -892,42 +914,57 @@ function seqArrowEl(x, y, dir, kind) {
 }
 
 // 参与者头部图形 + 名称，返回 SVG 元素数组
+const SEQ_ZOOM = 1.5; // 时序参与者（含业务模型）整体放大倍数
 function seqPartGlyph(p) {
   const cx = p.x, cy = p.y;
-  const box = [];
-  // 透明命中区，方便整块拖动
-  box.push(el('rect', { x: cx - p.w / 2, y: cy - p.h / 2, width: p.w, height: p.h, rx: 6, class: 'hit' }));
+  // 透明命中区保持原始尺寸（不随缩放放大），方便整块拖动
+  const hit = el('rect', { x: cx - p.w / 2, y: cy - p.h / 2, width: p.w, height: p.h, rx: 6, class: 'hit' });
+  const gSeq = el('g');
+  const put = (arr) => { for (const e of arr) gSeq.appendChild(e); };
 
   if (p.kind === 'object') {
     // 对象：保留外框，名称居中
-    box.push(el('rect', {
+    put([el('rect', {
       x: cx - p.w / 2, y: cy - 22, width: p.w, height: 44, rx: 6, class: 'seq-box'
-    }));
-    box.push(el('text', { x: cx, y: cy + 5, class: 'seq-actor-text', 'text-anchor': 'middle' }, p.label));
-    return box;
-  }
-
-  if (p.kind === 'actor') {
+    }),
+    el('text', { x: cx, y: cy + 5, class: 'seq-actor-text', 'text-anchor': 'middle' }, p.label)]);
+  } else if (p.kind === 'actor') {
     // 角色：无外框，复刻活动图的火柴小人（headR=6 的小号缩放版），名称置于下方
     const figTop = cy - 26;
-    box.push(...actorGlyph(cx, figTop, { headR: 6, label: p.label, labelY: 52 }));
-    return box;
-  }
+    put(actorGlyph(cx, figTop, { headR: 6, label: p.label, labelY: 52 }));
+  }else if(p.kind === 'busworker'){
+      const figTop = cy - 13;
+      put(actorGlyph(cx, figTop, { headR: 2.8, label: p.label, labelY: 52 }));
+      let cyc = cy - 4, R = 13;
+      put(iconControl(cx, cyc, R));
+      gSeq.appendChild(bizSlash(cx, cyc + R * 1.05 , cx + R * 1.05 , cyc, '#475569',1.8));
 
-  // 控制类 / 实体类 / 边界类：无外框，标准 UML 版型图标 + 名称
-  const cyc = cy - 4, R = 13;
-  if (p.kind === 'control') {
-    return box.concat(iconControl(cx, cyc, R, p.label));
-  } else if (p.kind === 'entity') {
-    return box.concat(iconEntity(cx, cyc, R, p.label));
-  } else if (p.kind === 'boundary') {
-    return box.concat(iconBoundary(cx, cyc, R, p.label));
-  } else {
-    // 兜底：默认画框
-    box.push(el('rect', { x: cx - p.w / 2, y: cy - 22, width: p.w, height: 44, rx: 6, class: 'seq-box' }));
-    box.push(el('text', { x: cx, y: cy + 5, class: 'seq-actor-text', 'text-anchor': 'middle' }, p.label));
+  }else {
+    // 控制类 / 实体类 / 边界类：无外框，标准 UML 版型图标 + 名称
+    const cyc = cy - 4, R = 13;
+    const biz = () => bizSlash(cx, cyc + R * 1.05 , cx + R * 1.05 , cyc, '#475569',1.8);
+    if (p.kind === 'control' || p.kind === 'buscontrol') {
+      put(iconControl(cx, cyc, R, p.label));
+      if (p.kind === 'buscontrol') gSeq.appendChild(biz());
+    } else if (p.kind === 'entity' || p.kind === 'busentity') {
+      put(iconEntity(cx, cyc, R, p.label));
+      if (p.kind === 'busentity') gSeq.appendChild(biz());
+    } else if (p.kind === 'boundary' || p.kind === 'busboundary') {
+      put(iconBoundary(cx, cyc, R, p.label));
+      if (p.kind === 'busboundary') gSeq.appendChild(biz());
+    } else {
+      // 兜底：默认画框
+      put([el('rect', { x: cx - p.w / 2, y: cy - 22, width: p.w, height: 44, rx: 6, class: 'seq-box' }),
+      el('text', { x: cx, y: cy + 5, class: 'seq-actor-text', 'text-anchor': 'middle' }, p.label)]);
+    }
   }
-  return box;
+  // 以参与者中心为锚点整体放大（图形、图标、标签文字均被放大）
+  //排除seq-box的放大
+  if(p.kind !== 'object'){
+    gSeq.setAttribute('transform', `translate(${cx} ${cy}) scale(${SEQ_ZOOM}) translate(${-cx} ${-cy})`);
+  }
+  //gSeq.setAttribute('transform', `translate(${cx} ${cy}) scale(${SEQ_ZOOM}) translate(${-cx} ${-cy})`);
+  return [hit, gSeq];
 }
 
 // 画一条消息（含箭头与文字）：端点自动吸附到覆盖该块的激活条（否则落在生命线）
