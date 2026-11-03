@@ -1,4 +1,4 @@
-﻿  :root{
+  :root{
     --bg:#f4f6fb; --panel:#fff; --border:#dde4ee; --text:#1e293b;
     --muted:#64748b; --accent:#4f6ef7; --accent2:#7c3aed;
     --ok:#059669; --err:#dc2626;
@@ -27,6 +27,8 @@
   button.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
   button.primary:hover{background:#3f5ce0;color:#fff;}
   button.ghost{background:#f8fafc;}
+  button:disabled{opacity:.42;cursor:not-allowed;}
+  button:disabled:hover{border-color:var(--border);color:var(--text);}
   main{flex:1;display:flex;min-height:0;}
   .pane{display:flex;flex-direction:column;min-width:0;min-height:0;}
   #left{width:var(--left-width,44%);background:#fff;}

@@ -25,6 +25,8 @@
   <div class="spacer"></div>
 
   <button id="btn-writeback" title="把当前画布位置写回源码末尾">反写代码</button>
+  <button class="ghost" id="btn-undo" title="撤销（Ctrl+Z）" disabled>↶ 撤销</button>
+  <button class="ghost" id="btn-redo" title="重做（Ctrl+Shift+Z）" disabled>↷ 重做</button>
 
   <div class="menu">
     <button type="button" class="ghost menu-btn"><svg class="ic"><use href="#ic-file"></use></svg>文件<span class="caret">▾</span></button>
@@ -83,6 +85,7 @@
       <span class="badge">滚轮缩放</span>
       <span class="badge">拖拽元素</span>
       <span class="badge">空白处拖拽平移</span>
+      <span class="badge">Ctrl+Z 撤销</span>
       <button id="btn-reset" style="padding:3px 10px;font-size:11.5px;">⟲ 复位视图</button>
       <button id="btn-refresh" style="padding:3px 10px;font-size:11.5px;"><svg class="ic ic-sm"><use href="#ic-refresh"></use></svg>刷新渲染</button>
       <span class="fs-wrap" title="统一调整画布字号"><span class="fs-label">A</span><input type="range" id="font-scale" min="70" max="160" value="100" step="5"><span class="fs-label" id="font-scale-val">100%</span></span>
@@ -102,6 +105,7 @@
   <script src="js/pipeline.js"></script>
   <script src="js/render.js"></script>
   <script src="js/view.js"></script>
+  <script src="js/undo.js"></script>
   <script src="js/export.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/samples.js"></script>

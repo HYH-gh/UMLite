@@ -460,8 +460,10 @@ function onBendDblClick(evt) {
   const bi = +evt.currentTarget.getAttribute('data-bend-idx');
   const e = currentModel.edges[ei];
   if (e && e.bends) {
+    const before = undoSnapshot();   // 双击不是拖拽手势，手动拍快照
     e.bends.splice(bi, 1);
     if (!e.bends.length) { e.bends = null; e.aAnchor = undefined; e.bAnchor = undefined; }
+    commitUndo(before);
     schedulePaint();
     setStatus('已删除折点', 'ok');
   }
@@ -477,9 +479,11 @@ function onCanvasDblClick(evt) {
   if (!hit) return;
 
   const e = currentModel.edges[hit.ei];
+  const before = undoSnapshot();
   if (!e.bends) e.bends = [];
   // 落在第 seg 段，即在折点序列的 seg 位置插入
   e.bends.splice(hit.seg, 0, { x: hit.q.x, y: hit.q.y });
+  commitUndo(before);
   schedulePaint();
   setStatus('已添加折点', 'ok');
 }
@@ -644,6 +648,9 @@ function render(opts) {
       setStatus('✓ 内容未变化，已跳过重排（画布位置保持不变）', 'ok');
       return;
     }
+
+    // 重新布局意味着几何全部重算：之前基于旧坐标的撤销快照不能再用了
+    if (typeof resetUndo === 'function') resetUndo();
 
     fitView();
     paint();

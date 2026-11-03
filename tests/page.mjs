@@ -28,6 +28,7 @@ const PAGE_SCRIPTS = [
   'js/pipeline.js',
   'js/render.js',
   'js/view.js',
+  'js/undo.js',
   'js/export.js',
   'js/ui.js',
   'js/samples.js',
@@ -56,15 +57,22 @@ function makeFakeDom() {
       style: {},
       value: '',
       title: '',
+      disabled: false,
       _cls: new Set(),
+      _ls: [],
       _text: '',
       get classList() { return classList(this); },
       setAttribute(k, v) { this.attrs[k] = String(v); },
       getAttribute(k) { return this.attrs[k] === undefined ? null : this.attrs[k]; },
       appendChild(c) { this.children.push(c); return c; },
       removeChild(c) { this.children = this.children.filter(x => x !== c); return c; },
-      addEventListener() {},
+      addEventListener(type, fn) { this._ls.push([type, fn]); },
       removeEventListener() {},
+      // 测试用：触发本节点上注册的监听器
+      fire(type, evt) {
+        const e = Object.assign({ type, button: 0, preventDefault() {}, stopPropagation() {} }, evt || {});
+        for (const [t, fn] of this._ls) if (t === type) fn(e);
+      },
       querySelector() { return null; },
       querySelectorAll() { return []; },
       getBoundingClientRect() { return { left: 0, top: 0, width: 900, height: 620 }; },
@@ -76,6 +84,8 @@ function makeFakeDom() {
       get textContent() { return this._text; }
     };
   }
+
+  const docListeners = [];
 
   const document = {
     body: FakeNode('body'),
@@ -96,7 +106,12 @@ function makeFakeDom() {
     createTextNode(text) { return { nodeType: 3, textContent: String(text), children: [] }; },
     querySelector() { return null; },
     querySelectorAll() { return []; },
-    addEventListener() {},
+    addEventListener(type, fn) { docListeners.push([type, fn]); },
+    removeEventListener() {},
+    fire(type, evt) {
+      const e = Object.assign({ type, button: 0, preventDefault() {}, stopPropagation() {} }, evt || {});
+      for (const [t, fn] of docListeners) if (t === type) fn(e);
+    },
     execCommand() { return true; }
   };
 
@@ -265,6 +280,59 @@ export function runPageSmoke() {
     editor().value = out;
     call('render');   // 必须能重新解析自己写出的位置块
     if (!/渲染成功|跳过重排/.test(status())) throw new Error('写回后渲染失败：' + status());
+  });
+
+  run('撤销/重做：一次拖拽 = 一步（走真实 pointerdown/pointerup 链路）', () => {
+    call('resetUndo');
+    const preview = dom.document.getElementById('preview');
+    const x0 = model().nodes[0].x;
+    preview.fire('pointerdown', { button: 0 });   // 捕获阶段拍快照
+    model().nodes[0].x += 37;                     // 拖动
+    call('paint');
+    dom.document.fire('pointerup');
+    if (g('undoStack.length') !== 1) throw new Error('一次拖拽应入栈 1 步，实际 ' + g('undoStack.length'));
+
+    call('undo');
+    if (model().nodes[0].x !== x0) throw new Error('撤销未还原坐标');
+    if (g('redoStack.length') !== 1) throw new Error('撤销后应可重做');
+
+    call('redo');
+    if (model().nodes[0].x !== x0 + 37) throw new Error('重做未恢复坐标');
+    if (g('undoStack.length') !== 1) throw new Error('重做后撤销栈应恢复');
+  });
+
+  run('撤销/重做：平移、点选这类空手势不占步数', () => {
+    call('resetUndo');
+    const preview = dom.document.getElementById('preview');
+    preview.fire('pointerdown', { button: 0 });
+    dom.document.fire('pointerup');                // 模型没有任何变化
+    if (g('undoStack.length') !== 0) throw new Error('空手势不应入栈');
+  });
+
+  run('撤销/重做：重新布局后清空栈', () => {
+    editor().value = '@diagram class\nclass A\nclass B\nA --> B';
+    call('render', { force: true });
+    call('resetUndo');
+    const before = call('undoSnapshot');
+    model().nodes[0].x += 12;
+    call('commitUndo', before);
+    if (g('undoStack.length') !== 1) throw new Error('入栈失败');
+    editor().value = editor().value + '\nclass C';
+    call('render');                                 // 结构变化 → 全量重排
+    if (g('undoStack.length') !== 0) throw new Error('重新布局后撤销栈应为空');
+    if (g('redoStack.length') !== 0) throw new Error('重做栈也应为空');
+  });
+
+  run('撤销/重做：按钮禁用状态跟随栈', () => {
+    call('resetUndo');
+    const btn = dom.document.getElementById('btn-undo');
+    if (!btn.disabled) throw new Error('空栈时撤销按钮应禁用');
+    const before = call('undoSnapshot');
+    model().nodes[0].x += 5;
+    call('commitUndo', before);
+    if (btn.disabled) throw new Error('有可撤销步骤时按钮应可用');
+    call('undo');
+    if (!btn.disabled) throw new Error('撤销后按钮应重新禁用');
   });
 
   return results;
