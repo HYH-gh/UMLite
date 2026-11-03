@@ -1,8 +1,10 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ==========================================================================
+/* ==========================================================================
  *  视图状态 & 绘制
  * ========================================================================== */
 
 let currentModel = null;
+// 上一次成功构建的结果（含结构签名），供 buildModel 判断能否复用布局
+let _lastBuild = null;
 const view = { zoom: 1, panX: 0, panY: 0 };
 let svgEl = null;
 let viewportEl = null;
@@ -626,44 +628,27 @@ preview.addEventListener('wheel', (evt) => {
  *  主流程
  * ========================================================================== */
 
-function render() {
+function render(opts) {
   const src = document.getElementById('editor').value;
   try {
-    const model = parseDSL(src);
-    prepareNodes(model);
+    const built = buildModel(src, {
+      previous: _lastBuild,
+      force: !!(opts && opts.force)
+    });
+    currentModel = built.model;
+    _lastBuild = built;
 
-    if (model.type === 'sequence') {
-      const dims = layoutSequence(model);
-      model.contentW = dims.width;
-      model.contentH = dims.height;
-    } else {
-      if (model.type === 'activity' || model.type === 'state') {
-        layoutActivity(model);
-        resolveOverlaps(model.nodes, model.type === 'activity' ? 44 : 42,
-          model.type === 'activity' ? 36 : 32);
-      } else if (model.type === 'usecase' && model.boundary) {
-        // 用例图含系统边界：仅对框内元素做力导向布局
-        const insideNodes = model.nodes.filter(n => n.insideBoundary);
-        if (insideNodes.length) {
-          const subModel = { ...model, nodes: insideNodes };
-          layoutForce(subModel);
-          // 二次更强的消除重叠，保证框内元素互不遮挡
-          resolveOverlaps(subModel.nodes, 64, 52);
-        }
-        // 框外元素在 normalizeToOrigin 中统一放置
-      } else {
-        layoutForce(model);
-      }
-      normalizeToOrigin(model);
+    // 结构（节点/连线/文字/@layout 块）完全没变：沿用上次的布局与拖动结果，
+    // 既不重排也不重绘，避免打字时图形乱跳、手动拖出来的位置被冲掉。
+    if (built.reused) {
+      setStatus('✓ 内容未变化，已跳过重排（画布位置保持不变）', 'ok');
+      return;
     }
 
-    if (model.type === 'activity') layoutActivityContainers(model);
-    applyLayout(model);
-
-    currentModel = model;
     fitView();
     paint();
 
+    const model = built.model;
     const count = model.type === 'sequence'
       ? model.participants.length + model.messages.length + model.activations.length + model.fragments.length
       : model.nodes.length;
@@ -673,8 +658,10 @@ function render() {
   }
 }
 
-let rafId = null;
+/* 输入去抖：停止输入 140ms 后才走一次渲染。
+   之前只在 rAF 里排队，等于每个按键都跑一遍完整流水线（力导向 320 轮 O(n²)）。 */
+let renderTimer = null;
 function renderDebounced() {
-  if (rafId) cancelAnimationFrame(rafId);
-  rafId = requestAnimationFrame(() => { rafId = null; render(); });
+  if (renderTimer) clearTimeout(renderTimer);
+  renderTimer = setTimeout(() => { renderTimer = null; render(); }, 140);
 }

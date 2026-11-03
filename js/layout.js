@@ -1,4 +1,4 @@
-﻿/* ==========================================================================
+/* ==========================================================================
  *  布局层
  * ========================================================================== */
 
@@ -160,7 +160,14 @@ function layoutForce(model) {
         const b = nodes[j];
         let dx = a.x - b.x, dy = a.y - b.y;
         let d2 = dx * dx + dy * dy;
-        if (d2 < 0.01) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 1; }
+        // 两点完全重合时需要一个扰动来打破奇点。这里用「索引 + 黄金角」构造确定性方向，
+        // 而不是 Math.random()：同一份 DSL 每次渲染必须得到完全相同的布局（可复现）。
+        if (d2 < 0.01) {
+          const t = (i * 0.6180339887498949 + j * 0.3819660112501051) % 1;
+          dx = Math.cos(t * Math.PI * 2);
+          dy = Math.sin(t * Math.PI * 2);
+          d2 = 1;
+        }
         const d = Math.sqrt(d2);
 
         const minX = (a.w + b.w) / 2 + 30;
@@ -408,6 +415,15 @@ function constrainOwnedToLanes(swimlanes, nodes) {
   }
 }
 
+/* 折点/锚点引用匹配：先按书写方向精确匹配，匹配不到再接受反向写法。
+   这样手写 `edge B->A` 或早期版本写出的反向引用都不会让位置块静默失效。 */
+function findEdgeByRefs(edges, from, to) {
+  if (!edges) return null;
+  return edges.find(e => e.from === from && e.to === to)
+      || edges.find(e => e.from === to && e.to === from)
+      || null;
+}
+
 /* 应用 @layout 位置定义：在归一化后把被定位的对象设为绝对坐标。
    放在 normalizeToOrigin 之后执行，故绝对值即为最终渲染坐标，双向 round-trip 稳定。 */
 function applyLayout(model) {
@@ -445,7 +461,7 @@ function applyLayout(model) {
     const bendByEdge = new Map();
     for (const item of L) {
       if (item.kind !== 'edgeBend') continue;
-      const e = model.edges && model.edges.find(ed => ed.from === item.from && ed.to === item.to);
+      const e = findEdgeByRefs(model.edges, item.from, item.to);
       if (!e) continue;
       if (!bendByEdge.has(e)) bendByEdge.set(e, []);
       bendByEdge.get(e).push({ idx: item.idx, x: item.x, y: item.y });
@@ -458,7 +474,7 @@ function applyLayout(model) {
   // 应用连线端点锚点：需边已有折点，锚点相对起点/终点节点中心的边缘偏移
   for (const item of L) {
     if (item.kind !== 'edgeAnchor') continue;
-    const e = model.edges && model.edges.find(ed => ed.from === item.from && ed.to === item.to);
+    const e = findEdgeByRefs(model.edges, item.from, item.to);
     if (!e || !e.bends || !e.bends.length) continue;
     const anchor = { dx: item.dx, dy: item.dy };
     if (item.which === 'start') e.aAnchor = anchor; else e.bAnchor = anchor;

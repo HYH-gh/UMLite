@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ---------------- UI 绑定 ---------------- */
+/* ---------------- UI 绑定 ---------------- */
 
 const editor = document.getElementById('editor');
 editor.addEventListener('input', renderDebounced);
@@ -79,89 +79,6 @@ bind('btn-src', () => {
   setStatus('已导出 diagram.uml（含当前位置信息）', 'ok');
 });
 
-/* 把当前画布坐标序列化为 @layout 位置块。
-   - 活动图：仅导出泳道与活动边（内部节点无稳定标识，不导出）
-   - 时序图：不支持（返回空）
-   - 其余图：导出全部具名节点 + 系统边界框 */
-function positionBlockFor(model) {
-  if (!model || !currentModel) return '';
-  if (model.type === 'activity') {
-    const lines = ['@layout'];
-    (model.swimlanes || []).forEach(s =>
-      lines.push(`lane ${s.label} @ (${Math.round(s.x)}, ${Math.round(s.y)}) ${Math.round(s.w)} ${Math.round(s.h)}`));
-    if (model.activityEdge) {
-      const b = model.activityEdge;
-      lines.push(`boundary @ (${Math.round(b.x)}, ${Math.round(b.y)}) ${Math.round(b.w)} ${Math.round(b.h)}`);
-    }
-    // 泳道内元素：二级定位，坐标相对其泳道（泳道即内部元素的画布）
-    for (const n of model.nodes || []) {
-      if (n.kind === 'pseudo' || !n.lane) continue;
-      const s = (model.swimlanes || []).find(x => x.label === n.lane);
-      if (!s) continue;
-      lines.push(`${n.id} @ lane ${s.label} (${Math.round(n.x - s.x)}, ${Math.round(n.y - s.y)}) ${Math.round(n.w)} ${Math.round(n.h)}`);
-    }
-    // 连线折点：按 <from>-><to> + 沿线序号 round-trip（活动图 from/to 为节点 id，稳定引用）
-    (model.edges || []).forEach(e => {
-      if (e.from == null || e.to == null || !e.bends) return;
-      e.bends.forEach((b, k) => {
-        if (!isFinite(b.x) || !isFinite(b.y)) return;
-        lines.push(`edge ${e.from}->${e.to} bend ${k} @ (${Math.round(b.x)}, ${Math.round(b.y)})`);
-      });
-      if (e.aAnchor && isFinite(e.aAnchor.dx) && isFinite(e.aAnchor.dy))
-        lines.push(`edge ${e.from}->${e.to} start (${Math.round(e.aAnchor.dx)}, ${Math.round(e.aAnchor.dy)})`);
-      if (e.bAnchor && isFinite(e.bAnchor.dx) && isFinite(e.bAnchor.dy))
-        lines.push(`edge ${e.from}->${e.to} end (${Math.round(e.bAnchor.dx)}, ${Math.round(e.bAnchor.dy)})`);
-    });
-    return lines.length > 1 ? lines.join('\n') : '';
-  }
-  // 时序图：导出参与者 / 消息 / 激活 / 组合片段的位置
-  if (model.type === 'sequence') {
-    const lines = ['@layout'];
-    if (model.lifeBottom != null) lines.push(`lifeBottom ${Math.round(model.lifeBottom)}`);
-    for (const p of model.participants || []) {
-      lines.push(`participant ${p.ref} @ (${Math.round(p.x)}, ${Math.round(p.y)}) ${Math.round(p.w)} ${Math.round(p.h)}`);
-    }
-    (model.messages || []).forEach((m, i) =>
-      lines.push(`message ${i} @ (_, ${Math.round(m.y)})`));
-    (model.activations || []).forEach((a, i) =>
-      lines.push(`activation ${i} @ (_, ${Math.round(a.startY)}) ${Math.round(a.endY - a.startY)}`));
-    (model.fragments || []).forEach((f, i) =>
-      lines.push(`fragment ${i} @ (${Math.round(f.x)}, ${Math.round(f.y)}) ${Math.round(f.w)} ${Math.round(f.h)}`));
-    return lines.length > 1 ? lines.join('\n') : '';
-  }
-  const lines = ['@layout'];
-  for (const n of model.nodes || []) {
-    if (n.kind === 'pseudo') continue;
-    lines.push(`${n.label} @ (${Math.round(n.x)}, ${Math.round(n.y)}) ${Math.round(n.w)} ${Math.round(n.h)}`);
-  }
-  // 连线折点：按 <from>-><to> + 沿线序号 round-trip（from/to 即节点名，稳定引用）
-  (model.edges || []).forEach(e => {
-    if (e.from == null || e.to == null || !e.bends) return;
-    e.bends.forEach((b, k) => {
-      if (!isFinite(b.x) || !isFinite(b.y)) return;
-      lines.push(`edge ${e.from}->${e.to} bend ${k} @ (${Math.round(b.x)}, ${Math.round(b.y)})`);
-    });
-    if (e.aAnchor && isFinite(e.aAnchor.dx) && isFinite(e.aAnchor.dy))
-      lines.push(`edge ${e.from}->${e.to} start (${Math.round(e.aAnchor.dx)}, ${Math.round(e.aAnchor.dy)})`);
-    if (e.bAnchor && isFinite(e.bAnchor.dx) && isFinite(e.bAnchor.dy))
-      lines.push(`edge ${e.from}->${e.to} end (${Math.round(e.bAnchor.dx)}, ${Math.round(e.bAnchor.dy)})`);
-  });
-  if (model.boundary) {
-    const b = model.boundary;
-    lines.push(`boundary @ (${Math.round(b.x)}, ${Math.round(b.y)}) ${Math.round(b.w)} ${Math.round(b.h)}`);
-  }
-  return lines.length > 1 ? lines.join('\n') : '';
-}
-
-/* 在源码末尾追加/替换位置块（不修改用户原有主体代码） */
-function withPositionBlock(src, model) {
-  const block = positionBlockFor(model);
-  if (!block) return src;
-  const idx = src.search(/^@layout\b/m);
-  const base = (idx >= 0 ? src.slice(0, idx) : src).replace(/\s+$/, '');
-  return base + '\n\n' + block + '\n';
-}
-
 bind('btn-copy', async () => {
   try {
     await navigator.clipboard.writeText(editor.value);
@@ -190,7 +107,7 @@ bind('btn-reset', () => {
   setStatus('视图已复位', 'ok');
 });
 
-bind('btn-refresh', () => render());
+bind('btn-refresh', () => render({ force: true }));
 
 /* ---------------- 分隔条拖拽（面板宽度可调） ---------------- */
 

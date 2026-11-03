@@ -10,6 +10,8 @@
 
 - **纯前端，零依赖** — 单个 `.html` 文件，双击即用，离线可用
 - **实时渲染** — 编辑代码即刻预览，无需手动触发
+- **增量渲染** — 只改注释、空行时自动跳过重排：画布不跳动，手动拖出来的坐标也不会被打字冲掉；结构变化才重新布局，且布局结果可复现（无随机数）
+- **可测试** — 自带 32 条 DSL 断言 + 页面级冒烟，`node tests/run.mjs` 一条命令跑完，也可在浏览器打开 `tests/index.html`
 - **10 种 UML 图** — 类图、用例图、活动图、时序图、E-R 图、状态图、组件图、部署图、对象图、包图
 - **力导向布局** — 元素自动排布，无需手动指定坐标
 - **交互式画布** — 拖拽元素、滚轮缩放、空白处拖拽平移
@@ -26,6 +28,8 @@
 - **位置代码（@layout）** — 用绝对坐标预定义元素的默认渲染位置，支持元素/泳道/顺序图各对象，画布拖动后**自动反写**，双向 round-trip
 - **导入 / 反写 .uml** — 从文件导入、拖入 `.uml` 自动解析；「反写代码」把画布当前位置写回编辑器
 - **顺序图可调节** — 组合片段四角调整大小、生命线统一高度手柄、激活条上下端点调节长度等，均可通过位置代码定义
+- **业务模型支持** — `business` 前缀表达业务领域元素（业务角色、业务用例、业务边界/控制/实体对象、业务工人），原子复用普通图形并叠加一条与主体同色的实线斜杠作为区分
+- **顺序图大字号参与者** — 参与者（含业务模型）默认以 1.5 倍放大渲染，图标、标签、业务斜杠一并放大，清晰易读
 
 ---
 
@@ -99,10 +103,10 @@ Hello --> World : greet
 ### 各图类型语法要点
 
 **类图：** `class 名称 { 成员 }` / `interface 名称 { 成员 }` / `abstract class 名称`
-**用例图：** `actor 角色` / `usecase 用例 [:boundary]` / `boundary "系统名称"`
+**用例图：** `actor 角色` / `usecase 用例 [:boundary]` / `boundary "系统名称"` / 业务模型：`business actor 业务角色` / `business usecase 业务用例`
 **活动图：** `start` / `:动作;` / `if(条件)`...`endif` / `while`...`endwhile` / `note:文本` / 泳道 `in "泳道名"` / 活动边 `edge`
 **E-R 图：** `entity 名称 { * 字段 }` / `||--o{` / `||--|{` / `||--||`
-**时序图：** `actor/object/control/entity/boundary 名称` / `A -> B : 消息` / `A --> B : 返回` / `activate A` / `deactivate A` / `alt ... else ... end` / `loop` / `opt` / `ref`
+**时序图：** `actor/object/control/entity/boundary 名称` / `A -> B : 消息` / `A --> B : 返回` / `activate A` / `deactivate A` / `alt ... else ... end` / `loop` / `opt` / `ref` / 业务参与者：`business actor/object/control/entity/boundary/worker 名称`
 
 **位置代码（`@layout` 块，附加在代码末尾）：**
 ```
@@ -157,30 +161,54 @@ lifeBottom  y                      // 时序图全部生命线统一底部高度
 
 ## 🏗️ 技术架构
 
-UMLite 是完全运行在浏览器中的单页应用，采用**三层架构**：
+UMLite 是完全运行在浏览器中的单页应用，源码按职责分层：
 
 ```
-┌──────────────────────────────────────┐
-│           渲染层 (SVG)               │
-│  buildGraphContent / paint / drawEdge│
-├──────────────────────────────────────┤
-│           布局层 (Layout)             │
-│  layoutForce / layoutActivity        │
-│  barycenterSort / orthogonalize      │
-│  normalizeToOrigin / initForcePos    │
-├──────────────────────────────────────┤
-│           解析层 (DSL Parser)         │
-│  parseDSL / parseClassLike           │
-├──────────────────────────────────────┤
-│           编辑器 + 交互层             │
-│  textarea / Pointer Events / Canvas  │
-└──────────────────────────────────────┘
+UMLite.html ─┬─ css/style.css
+             └─ js/
+                 util.js         通用工具：el() / textWidth() / 全局字号系数
+                 layoutcode.js   @layout 位置代码的唯一实现（读 + 写，双向一致）
+                 parser.js       DSL 解析：parseDSL → parseClassLike / parseActivity / parseSequence
+                 layout.js       布局算子：力导向、正交化、分层+Barycenter、消重叠、时序布局
+                 pipeline.js     管线：buildModel() = 解析 → 尺寸 → 布局 → 应用 @layout
+                 render.js       渲染层：SVG 图形与连线、时序图生命线 / 激活条 / 组合片段
+                 view.js         视图与交互：paint()、缩放平移、十余种拖拽状态机
+                 export.js       SVG / PNG 导出
+                 ui.js           顶栏、导入、反写代码、分隔条、菜单
+                 samples.js      10 个内置示例
+                 history.js      localStorage 历史记录
+                 main.js         启动
 ```
 
-- **解析层**：正则表达式 + 行解析器，将 DSL 文本转换为结构化模型
-- **布局层**：按图类型自适应 — 类图力导向后正交化（横平竖直）、活动图 / 状态图分层布局 + Barycenter 层间排序（降低交叉）、用例图边界分离布局（防重叠），并基于连通分量聚类进行初始排布
+- **管线层**：`buildModel(src)` 是「DSL → 可渲染模型」的唯一入口，主应用与元素测试页共用它，避免两处各抄一份布局分支
+- **解析层**：正则表达式 + 行解析器，将 DSL 文本转换为结构化模型；`@layout` 位置块的读（`parseLayoutBlock`）与写（`serializeLayoutBlock`）集中在 `layoutcode.js`，一份语法一处定义，读写不会漂移
+- **布局层**：按图类型自适应 — 类图力导向后正交化（横平竖直）、活动图 / 状态图分层布局 + Barycenter 层间排序（降低交叉）、用例图边界分离布局（防重叠），并基于连通分量聚类进行初始排布；布局不使用随机数，同一份 DSL 每次结果完全一致
+- **增量渲染**：`buildModel(src, { previous })` 先比对「结构签名」（剔除几何字段后的模型 JSON）与 `@layout` 块，一致时直接复用上次模型、跳过重排 —— 打字不打断画布，拖动结果也不会被冲掉
 - **渲染层**：纯 SVG 渲染，支持拖拽、缩放、平移交互
-- **零依赖**：不使用任何第三方库，纯原生 JavaScript + SVG
+- **零依赖**：不使用任何第三方库，纯原生 JavaScript + SVG（测试也只用 node 内置能力）
+
+---
+
+## 🧪 测试
+
+零依赖、零安装，两种跑法：
+
+```bash
+node tests/run.mjs      # 全部：32 条 DSL 断言 + 7 项页面级冒烟
+node tests/page.mjs     # 只跑页面级冒烟
+```
+
+也可以直接双击 `tests/index.html` 在浏览器里看结果（与 node 共用同一套用例）。
+
+| 文件 | 作用 |
+|---|---|
+| `tests/cases.js` | DSL 用例：10 种图、关系运算符、`@layout`、布局质量 |
+| `tests/harness.js` | 断言收集器；每条用例还会自动附加三项不变量 — 几何数值必须有限、布局必须可复现、`@layout` 往返不得漂移 |
+| `tests/page.mjs` | 在假 DOM 里按页面顺序加载全部脚本，验证启动渲染、增量跳过、10 个示例、反写回环 |
+| `tests/run.mjs` | node 运行器（vm + 最小 DOM 桩），退出码可直接挂 CI |
+| `test-elements.html` | 元素视觉清单页（人工看图形样式，非自动断言） |
+
+新增语法或图形时，在 `tests/cases.js` 里补一条用例即可 —— 顺手就能发现方向、多重度、往返这类肉眼容易漏掉的问题（E-R 关系方向的不一致就是这样被抓出来的）。
 
 ---
 

@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/* ---------------- 解析层 ---------------- */
+/* ---------------- 解析层 ---------------- */
 
 const DIAGRAM_ALIASES = {
   class: 'class', classdiagram: 'class', '类图': 'class',
@@ -40,13 +40,10 @@ const ARROW_NORMALIZE = {
   '<--': '-->', '<|--': '--|>', '<|..': '..|>', '<..': '..>', '<-': '->',
   '--*': '*--', '--o': 'o--'
 };
-// E-R 箭头反向映射
-const _erRev = { '||--o{':'o{--||','||--||':'||--||','||--|{':'|{--||','}o--||':'||--}o','}o--|{':'|{--}o','}o--o{':'o{--}o','--o{':'o{--','--||':'||--','--|{':'|{--','||--':'--||','}o--':'--}o' };
-for (const [k,v] of Object.entries(_erRev)) ARROW_NORMALIZE[k] = v;
-// 将反向 E-R 箭头也加入 ARROW_SPEC
-for (const a of Object.values(_erRev)) {
-  if (!ARROW_SPEC[a]) ARROW_SPEC[a] = { kind: 'association', dash: false, head: 'none' };
-}
+// E-R 箭头不参与「反向运算符翻转」：|| }o o{ |{ 这些标记本身就不对称，
+// 左右两侧各自携带自己的多重度（'A ||--o{ B' 与 'A o{--|| B' 是两个不同含义），
+// 一旦按「反向写法」翻转整行，from/to 会与源码字面方向相反。
+// 各种写法一律由 ER_ARROW_MULT 就地解释（见 parseEdgeLine）。
 
 function findArrow(s) {
   let best = null;
@@ -529,88 +526,5 @@ function parseDSL(src) {
   return model;
 }
 
-/* 解析 @layout 位置定义块 → { kind, name?, x, y, w?, h? }
-   格式：<元素引用> @ (x, y) [w h]
-   - 普通元素（类/对象/用例等）：@ (cx, cy) 为元素中心点
-   - boundary：@ (x, y) 为左上角，作用于系统边界框 / 活动边
-   - lane 泳道名：@ (x, y) 为左上角，作用于泳道
-   非法/无法识别的行被宽容忽略（不影响图主体）。 */
-function parseLayoutBlock(lines, type) {
-  const out = [];
-  for (const { text: raw } of lines) {
-    // 时序图：生命线统一底部高度 <y>
-    const lb = raw.match(/^lifeBottom\s+([-+0-9.]+)\s*$/i);
-    if (lb) {
-      const v = parseFloat(lb[1]);
-      if (!isNaN(v) && v > 0) out.push({ kind: 'seqLifeBottom', v });
-      continue;
-    }
-    // 时序图：参与者 <名> @ (x, y) [w h]
-    const pm2 = raw.match(/^participant\s+(.+?)\s+@\s*\(([-+0-9.]+)\s*,\s*([-+0-9.]+)\s*\)\s*(?:([-0-9.]+)\s+([-0-9.]+))?\s*$/i);
-    if (pm2) {
-      out.push({ kind: 'seqPart', name: pm2[1].trim(), x: +pm2[2], y: +pm2[3],
-                 w: pm2[4] != null ? +pm2[4] : undefined, h: pm2[5] != null ? +pm2[5] : undefined });
-      continue;
-    }
-    // 时序图：消息 <序号> @ (x, y)　x 可用 _ 表示“不约束水平位置”
-    const ms = raw.match(/^message\s+(\d+)\s+@\s*\(([-_+0-9.]+)\s*,\s*([-+0-9.]+)\s*\)\s*$/i);
-    if (ms) {
-      out.push({ kind: 'seqMsg', idx: +ms[1], x: ms[2] === '_' ? undefined : +ms[2], y: +ms[3] });
-      continue;
-    }
-    // 时序图：激活条 <序号> @ (x, y) [h]　y 为激活条顶部，h 为高度（仅一个可选数字）
-    const at = raw.match(/^activation\s+(\d+)\s+@\s*\(([-_+0-9.]+)\s*,\s*([-+0-9.]+)\s*\)\s*(?:([-0-9.]+))?\s*$/i);
-    if (at) {
-      out.push({ kind: 'seqAct', idx: +at[1], y: +at[3],
-                 h: at[4] != null ? +at[4] : undefined });
-      continue;
-    }
-    // 时序图：组合片段 <序号> @ (x, y) [w h]
-    const fg = raw.match(/^fragment\s+(\d+)\s+@\s*\(([-+0-9.]+)\s*,\s*([-+0-9.]+)\s*\)\s*(?:([-0-9.]+)\s+([-0-9.]+))?\s*$/i);
-    if (fg) {
-      out.push({ kind: 'seqFrag', idx: +fg[1], x: +fg[2], y: +fg[3],
-                 w: fg[4] != null ? +fg[4] : undefined, h: fg[5] != null ? +fg[5] : undefined });
-      continue;
-    }
-    // 泳道内二级定位：<元素id> @ lane <泳道名> (x, y) [w h]　坐标相对该泳道（泳道即内部元素的画布）
-    const lm = raw.match(/^([A-Za-z_][\w.]*)\s+@\s+lane\s+(.+?)\s*\(\s*([-+0-9.]+)\s*,\s*([-+0-9.]+)\s*\)\s*(?:([-0-9.]+)\s+([-0-9.]+))?\s*$/i);
-    if (lm) {
-      const lx = parseFloat(lm[3]), ly = parseFloat(lm[4]);
-      if (isNaN(lx) || isNaN(ly)) continue;
-      out.push({ kind: 'laneNode', id: lm[1], lane: lm[2].trim(), x: lx, y: ly,
-                 w: lm[5] != null ? parseFloat(lm[5]) : undefined,
-                 h: lm[6] != null ? parseFloat(lm[6]) : undefined });
-      continue;
-    }
-    // 连线折点：edge <起点>-><终点> bend <序号> @ (x, y)　坐标即折点绝对位置，序号为沿线(bends)顺序
-    const be = raw.match(/^edge\s+(.+?)\s*->\s*(.+?)\s+bend\s+(\d+)\s+@\s*\(\s*([-+0-9.]+)\s*,\s*([-+0-9.]+)\s*\)\s*$/i);
-    if (be) {
-      const x = parseFloat(be[4]), y = parseFloat(be[5]);
-      if (!isNaN(x) && !isNaN(y)) out.push({ kind: 'edgeBend', from: be[1].trim(), to: be[2].trim(), idx: +be[3], x, y });
-      continue;
-    }
-    // 连线端点锚点：edge <起点>-><终点> (start|end) (dx, dy)　dx/dy 为相对起点/终点节点中心的边缘偏移
-    const an = raw.match(/^edge\s+(.+?)\s*->\s*(.+?)\s+(start|end)\s*\(\s*([-+0-9.]+)\s*,\s*([-+0-9.]+)\s*\)\s*$/i);
-    if (an) {
-      const dx = parseFloat(an[4]), dy = parseFloat(an[5]);
-      if (!isNaN(dx) && !isNaN(dy)) out.push({ kind: 'edgeAnchor', from: an[1].trim(), to: an[2].trim(), which: an[3].toLowerCase(), dx, dy });
-      continue;
-    }
-    const m = raw.match(/^(.+?)\s+@\s*\(\s*([-+0-9.]+)\s*,\s*([-+0-9.]+)\s*\)\s*(?:([-0-9.]+)\s+([-0-9.]+))?\s*$/i);
-    if (!m) continue;
-    const ref = m[1].trim();
-    const x = parseFloat(m[2]), y = parseFloat(m[3]);
-    if (isNaN(x) || isNaN(y)) continue;
-    const w = m[4] != null ? parseFloat(m[4]) : undefined;
-    const h = m[5] != null ? parseFloat(m[5]) : undefined;
-    if (/^lane\s+/i.test(ref)) {
-      out.push({ kind: 'lane', name: ref.slice(4).trim(), x, y, w, h });
-    } else if (/^boundary$/i.test(ref)) {
-      out.push({ kind: 'boundary', x, y, w, h });
-    } else {
-      const kwm = ref.match(/^\s*(?:class|interface|abstract\s*class|entity|object|component|package|usecase|actor|participant|state)\s+(.+?)\s*$/i);
-      out.push({ kind: 'node', name: kwm ? kwm[1].trim() : ref, x, y, w, h });
-    }
-  }
-  return out;
-}
+/* @layout 位置代码的解析已移入 js/layoutcode.js（与序列化同处一文件，保证读写一致）。
+   此处只调用全局 parseLayoutBlock()。 */

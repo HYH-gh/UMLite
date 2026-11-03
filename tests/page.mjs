@@ -1,0 +1,285 @@
+/* ==========================================================================
+ *  页面级冒烟测试：在假 DOM 里按 UMLite.html 的顺序加载全部脚本
+ *
+ *  目的不是替代浏览器，而是把「页面能启动、能渲染、增量逻辑生效」变成一条命令：
+ *    node tests/page.mjs   （或由 tests/run.mjs 一并执行）
+ *
+ *  覆盖：
+ *    ① 首屏渲染：main.js 自动载入示例 → currentModel 就绪、SVG 树里有节点
+ *    ② 增量渲染：只改注释 → 结构签名不变 → 复用模型、跳过重排（画布不跳）
+ *    ③ 结构变化：改类名 → 重新布局、状态栏回到「渲染成功」
+ *    ④ 全部内置示例都能渲染且不抛错
+ * ========================================================================== */
+
+import fs from 'node:fs';
+import path from 'node:path';
+import vm from 'node:vm';
+import { fileURLToPath } from 'node:url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(HERE, '..');
+
+/* 与 UMLite.html 完全一致的加载顺序 */
+const PAGE_SCRIPTS = [
+  'js/util.js',
+  'js/layoutcode.js',
+  'js/parser.js',
+  'js/layout.js',
+  'js/pipeline.js',
+  'js/render.js',
+  'js/view.js',
+  'js/export.js',
+  'js/ui.js',
+  'js/samples.js',
+  'js/history.js',
+  'js/main.js'
+];
+
+/* ---------------- 极简 DOM ---------------- */
+
+function makeFakeDom() {
+  const ids = new Map();
+  const ctx2d = { font: '', measureText: (s) => ({ width: String(s).length * 7 }) };
+
+  const classList = (node) => ({
+    add: (c) => { node._cls.add(c); },
+    remove: (c) => { node._cls.delete(c); },
+    contains: (c) => node._cls.has(c),
+    toggle: (c) => { node._cls.has(c) ? node._cls.delete(c) : node._cls.add(c); }
+  });
+
+  function FakeNode(tag) {
+    return {
+      tagName: tag,
+      attrs: {},
+      children: [],
+      style: {},
+      value: '',
+      title: '',
+      _cls: new Set(),
+      _text: '',
+      get classList() { return classList(this); },
+      setAttribute(k, v) { this.attrs[k] = String(v); },
+      getAttribute(k) { return this.attrs[k] === undefined ? null : this.attrs[k]; },
+      appendChild(c) { this.children.push(c); return c; },
+      removeChild(c) { this.children = this.children.filter(x => x !== c); return c; },
+      addEventListener() {},
+      removeEventListener() {},
+      querySelector() { return null; },
+      querySelectorAll() { return []; },
+      getBoundingClientRect() { return { left: 0, top: 0, width: 900, height: 620 }; },
+      get clientWidth() { return 900; },
+      get clientHeight() { return 620; },
+      set innerHTML(v) { if (!v) this.children = []; this._text = v; },
+      get innerHTML() { return this._text; },
+      set textContent(v) { this._text = String(v); },
+      get textContent() { return this._text; }
+    };
+  }
+
+  const document = {
+    body: FakeNode('body'),
+    documentElement: FakeNode('html'),
+    getElementById(id) {
+      if (!ids.has(id)) {
+        const n = FakeNode(id === 'editor' ? 'textarea' : id === 'samples' ? 'select' : 'div');
+        n.id = id;
+        ids.set(id, n);
+      }
+      return ids.get(id);
+    },
+    createElement(tag) {
+      if (tag === 'canvas') return { getContext: () => ctx2d, style: {} };
+      return FakeNode(tag);
+    },
+    createElementNS(ns, tag) { return FakeNode(tag); },
+    createTextNode(text) { return { nodeType: 3, textContent: String(text), children: [] }; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    addEventListener() {},
+    execCommand() { return true; }
+  };
+
+  const store = new Map();
+  const sandbox = {
+    console,
+    document,
+    navigator: { clipboard: { writeText: async () => {} } },
+    localStorage: {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => { store.set(k, String(v)); },
+      removeItem: (k) => { store.delete(k); }
+    },
+    // 定时器打桩：不让去抖/历史写入在测试过程中异步触发
+    setTimeout: () => 1,
+    clearTimeout: () => {},
+    requestAnimationFrame: (cb) => { cb(); return 1; },
+    cancelAnimationFrame: () => {},
+    URL: { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} },
+    Blob: function Blob() {},
+    Image: function Image() {},
+    getComputedStyle: () => ({ getPropertyValue: () => '44%' }),
+    XMLSerializer: function XMLSerializer() { this.serializeToString = () => ''; },
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  sandbox.self = sandbox;
+  return { ctx: vm.createContext(sandbox), dom: { document, ids }, sandbox };
+}
+
+/* ---------------- 断言 ---------------- */
+
+function makeChecks() {
+  const results = [];
+  const t = {
+    ok(cond, msg) { if (!cond) throw new Error(msg || '断言失败'); }
+  };
+  return { results, t };
+}
+
+const SVG_TEXT = /NaN|Infinity|undefined/;
+
+/* 统计 SVG 树里的节点数 / data-node-id 数 / 非法属性 */
+function scanSvg(root) {
+  let els = 0, tagged = 0;
+  const bad = [];
+  (function walk(n) {
+    if (!n || typeof n !== 'object') return;
+    els++;
+    if (n.attrs) {
+      if (n.attrs['data-node-id'] !== undefined || n.attrs['data-seqkind'] !== undefined) tagged++;
+      for (const k of Object.keys(n.attrs)) {
+        if (SVG_TEXT.test(n.attrs[k])) bad.push(k + '=' + n.attrs[k]);
+      }
+    }
+    for (const c of n.children || []) walk(c);
+  })(root);
+  return { els, tagged, bad };
+}
+
+export function runPageSmoke() {
+  const results = [];
+  const run = (name, fn) => {
+    try { fn(); results.push({ name, ok: true, fails: [] }); }
+    catch (e) { results.push({ name, ok: false, fails: [String((e && e.message) || e)] }); }
+  };
+
+  const { ctx, dom } = makeFakeDom();
+  try {
+    for (const rel of PAGE_SCRIPTS) {
+      vm.runInContext(fs.readFileSync(path.join(ROOT, rel), 'utf8'), ctx, { filename: rel });
+    }
+  } catch (e) {
+    results.push({ name: '页面脚本加载', ok: false, fails: ['加载失败：' + e.message] });
+    return results;
+  }
+  results.push({ name: '页面脚本加载', ok: true, fails: [] });
+
+  const status = () => dom.document.getElementById('status').textContent;
+  const editor = () => dom.document.getElementById('editor');
+  // 顶层 let/const 不会挂到全局对象上（浏览器和 vm 都是这样），只能回上下文里取
+  const g = (expr) => vm.runInContext('(' + expr + ')', ctx);
+  const model = () => g('currentModel');
+  const samples = () => g('SAMPLES');
+  const call = (fn, ...args) => g(fn)(...args);
+
+  const firstSvg = () => {
+    const preview = dom.document.getElementById('preview');
+    return preview.children[0] || null;
+  };
+
+  run('启动即渲染：模型与 SVG 树就绪', () => {
+    const m = model();
+    if (!m) throw new Error('currentModel 为空');
+    if (m.type !== 'class') throw new Error('首屏应载入类图示例，实际 ' + m.type);
+    const svg = firstSvg();
+    if (!svg) throw new Error('preview 中没有 svg');
+    const s = scanSvg(svg);
+    if (s.els < 20) throw new Error('SVG 元素过少：' + s.els);
+    if (s.tagged < 5) throw new Error('未找到 data-node-id 命中框：' + s.tagged);
+    if (s.bad.length) throw new Error('SVG 属性含非法值：' + s.bad.slice(0, 3).join(', '));
+    if (!/渲染成功/.test(status())) throw new Error('状态栏不是渲染成功：' + status());
+  });
+
+  run('增量渲染：只加注释不重排、不换模型', () => {
+    const before = model();
+    const posBefore = before.nodes.map(n => [n.id, n.x, n.y]);
+    editor().value = editor().value + '\n// 只加一行注释\n';
+    call('render');
+    if (model() !== before) throw new Error('结构未变却重建了模型');
+    const posAfter = model().nodes.map(n => [n.id, n.x, n.y]);
+    if (JSON.stringify(posBefore) !== JSON.stringify(posAfter)) throw new Error('节点位置被重置');
+    if (!/跳过重排/.test(status())) throw new Error('状态栏未提示跳过重排：' + status());
+  });
+
+  run('结构变化：改类名会重新布局', () => {
+    const before = model();
+    const id = before.nodes[0].id;
+    const re = new RegExp('class\\s+' + id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b');
+    if (!re.test(editor().value)) throw new Error('示例里没找到 class ' + id);
+    editor().value = editor().value.replace(re, 'class ' + id + 'Renamed');
+    call('render');
+    if (model() === before) throw new Error('结构变了却复用了旧模型');
+    if (!model().nodes.some(n => n.id === id + 'Renamed')) throw new Error('新类名未进入模型');
+    if (!/渲染成功/.test(status())) throw new Error('状态栏未提示渲染成功：' + status());
+  });
+
+  run('拖动结果在打字后保留（不再被重排冲掉）', () => {
+    const m = model();
+    const n = m.nodes[0];
+    const x0 = n.x, y0 = n.y;
+    n.x += 40; n.y += 25;          // 模拟一次拖拽
+    call('paint');                  // 拖拽只会重绘
+    editor().value = editor().value + '\n# 又一个注释\n';
+    call('render');
+    if (n.x !== x0 + 40 || n.y !== y0 + 25) throw new Error('拖动坐标被重排冲掉了');
+  });
+
+  run('10 个内置示例全部可渲染', () => {
+    const lib = samples();
+    const names = Object.keys(lib);
+    if (names.length < 10) throw new Error('示例数量异常：' + names.length);
+    for (const name of names) {
+      editor().value = lib[name];
+      call('render', { force: true });
+      if (!model()) throw new Error(name + '：未生成模型');
+      if (!/渲染成功/.test(status())) throw new Error(name + '：' + status());
+      const svg = firstSvg();
+      if (!svg) throw new Error(name + '：没有 svg');
+      const s = scanSvg(svg);
+      if (s.els < 5) throw new Error(name + '：SVG 元素过少（' + s.els + '）');
+      if (s.bad.length) throw new Error(name + '：SVG 属性含非法值 ' + s.bad.slice(0, 3).join(', '));
+    }
+  });
+
+  run('反写代码：位置块可写入源码', () => {
+    const lib = samples();
+    editor().value = lib[Object.keys(lib)[0]];
+    call('render', { force: true });
+    const block = call('serializeLayoutBlock', model());
+    if (!block || block.split('\n')[0] !== '@layout') throw new Error('未生成 @layout 块');
+    const out = call('withPositionBlock', editor().value, model());
+    if (out.indexOf('@layout') < 0) throw new Error('withPositionBlock 未写入位置块');
+    editor().value = out;
+    call('render');   // 必须能重新解析自己写出的位置块
+    if (!/渲染成功|跳过重排/.test(status())) throw new Error('写回后渲染失败：' + status());
+  });
+
+  return results;
+}
+
+/* 允许单独执行：node tests/page.mjs */
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  const results = runPageSmoke();
+  let failed = 0;
+  for (const r of results) {
+    if (r.ok) console.log('  \u001b[32m✓\u001b[0m ' + r.name);
+    else { failed++; console.log('  \u001b[31m✗\u001b[0m ' + r.name); r.fails.forEach(f => console.log('      ' + f)); }
+  }
+  console.log('');
+  console.log(failed ? `\u001b[31m${failed} 项失败\u001b[0m / 共 ${results.length} 项` : `\u001b[32m全部通过\u001b[0m：${results.length} 项`);
+  process.exitCode = failed ? 1 : 0;
+}

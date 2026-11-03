@@ -10,8 +10,8 @@
   body { background: #f1f5f9; padding: 12px; overflow-y: auto; }
   #wrap { display: flex; flex-wrap: wrap; gap: 12px; }
   figure { box-sizing: border-box; 
-    width: var(--fig-width, 200px);   /* 默认 200px */
-    height: var(--fig-height, 168px); /* 默认 168px */
+    width: var(--fig-width, 220px);   /* 默认 200px */
+    height: var(--fig-height, 185px); /* 默认 168px */
     margin: 0; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,.05); padding: 6px; display: flex; align-items: center; justify-content: center; }
   figure svg { width: 100%; height: 100%; display: block; }
 </style>
@@ -21,14 +21,16 @@
 <div style="margin-bottom: 12px; display: flex;align-items: center; gap: 12px;position: sticky;top: 0;">
     <label for="zoomSlider">等比缩放:</label>
     <input type="range" id="zoomSlider" min="100" max="400" value="200" step="10">
-    <span id="zoomValue">200 x 168</span>
+    <span id="zoomValue">220 x 185</span>
 </div>
 
 <div id="wrap"></div>
 
 <script src="js/util.js"></script>
+<script src="js/layoutcode.js"></script>
 <script src="js/parser.js"></script>
 <script src="js/layout.js"></script>
+<script src="js/pipeline.js"></script>
 <script src="js/render.js"></script>
 <script>
     (function() {
@@ -53,37 +55,8 @@
 (function () {
   'use strict';
 
-  /* ---- 复刻 view.js render() 中的布局分支：parse → layout → apply ---- */
-  function buildModel(src) {
-    const model = parseDSL(src);
-    prepareNodes(model);
-
-    if (model.type === 'sequence') {
-      const dims = layoutSequence(model);
-      model.contentW = dims.width;
-      model.contentH = dims.height;
-    } else {
-      if (model.type === 'activity' || model.type === 'state') {
-        layoutActivity(model);
-        resolveOverlaps(model.nodes, model.type === 'activity' ? 44 : 42,
-          model.type === 'activity' ? 36 : 32);
-      } else if (model.type === 'usecase' && model.boundary) {
-        const insideNodes = model.nodes.filter(n => n.insideBoundary);
-        if (insideNodes.length) {
-          const subModel = { ...model, nodes: insideNodes };
-          layoutForce(subModel);
-          resolveOverlaps(subModel.nodes, 64, 52);
-        }
-      } else {
-        layoutForce(model);
-      }
-      normalizeToOrigin(model);
-    }
-
-    if (model.type === 'activity') layoutActivityContainers(model);
-    applyLayout(model);
-    return model;
-  }
+  /* 图模型统一由 js/pipeline.js 的 buildModel() 构建（parse → layout → @layout），
+     本页不再复刻 view.js 的布局分支，保证「测试页」与「主应用」渲染的是同一个模型。 */
 
   /* ---- 把一段最小 DSL 渲染成一张独立小画布（自动按内容适配 viewBox） ---- */
   function addCard(src, hint) {
@@ -92,7 +65,7 @@
     const fig = document.createElement('figure');
     fig.title = hint || '';
     try {
-      const model = buildModel(src);
+      const model = buildModel(src).model;
       const content = model.type === 'sequence'
         ? buildSequenceContent(model)
         : buildGraphContent(model);
@@ -156,6 +129,11 @@ enum Status {
   READY
   PAUSED
   DONE
+}`],
+    ['通知、备注', `
+@diagram class
+notice 用户操作{
+  用户退款
 }
 `],
 
