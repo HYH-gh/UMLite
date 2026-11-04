@@ -370,8 +370,6 @@ function parseSequence(lines) {
   const activations = [];
   const fragmentStack = [];
   const fragments = [];
-  const pendingAct = new Map();
-  const actOffsets = new Map();
 
   // 参与者：声明用立体类型；消息里引用时自动以 defaultKinds 补全
   const ensurePart = (name, kind) => {
@@ -429,30 +427,26 @@ function parseSequence(lines) {
       continue;
     }
 
-    // 3. 激活 / 去激活（off 取当前嵌套深度，保证顺序多段激活都落在生命线 x 处）
+    // 3. 激活 / 去激活：全部显式声明，一段激活条 = 一对 activate/deactivate。
+    //    同一生命线允许嵌套（消息会吸附到最外层的激活条上），但不画错位层级。
     if ((m = text.match(/^activate\s+(.+)$/i))) {
       const ref = readToken(m[1].trim())[0];
       if (!ref) continue;
       const p = ensurePart(ref, 'object');
-      const depth = actOffsets.get(p.ref) || 0;
-      actOffsets.set(p.ref, depth + 1);
       const r = nextRow();
-      const act = { id: 'a' + activations.length, part: p.ref, startRow: r, endRow: -1, off: depth };
-      activations.push(act);
-      pendingAct.set(p.ref, act);
+      activations.push({ id: 'a' + activations.length, part: p.ref, startRow: r, endRow: -1 });
       continue;
     }
     if ((m = text.match(/^deactivate\s+(.+)$/i))) {
       const ref = readToken(m[1].trim())[0];
       const r = nextRow();
-      if (ref) {
-        const pa = pendingAct.get(ref);
-        if (pa) {
-          pa.endRow = r; pendingAct.delete(ref);
-          const d = actOffsets.get(ref) || 0;
-          actOffsets.set(ref, Math.max(0, d - 1));
+      if (!ref) continue;
+      // 闭合该参与者最近的未闭合激活条；没有可闭合的就忽略（不凭空造条）
+      for (let i = activations.length - 1; i >= 0; i--) {
+        if (activations[i].part === ref && activations[i].endRow < 0) {
+          activations[i].endRow = r;
+          break;
         }
-        else activations.push({ id: 'a' + activations.length, part: ref, startRow: r, endRow: r + 1, off: 0 });
       }
       continue;
     }
@@ -478,7 +472,7 @@ function parseSequence(lines) {
 
   // 未闭合的激活/片段收到末尾
   const lastRow = Math.max(row - 1, 0);
-  for (const [, act] of pendingAct) act.endRow = lastRow;
+  for (const a of activations) if (a.endRow < 0) a.endRow = lastRow;
   for (const fr of fragmentStack) fr.endRow = lastRow;
 
   return { nodes: [], edges: [], participants, messages, activations, fragments };

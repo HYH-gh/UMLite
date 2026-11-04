@@ -243,7 +243,41 @@ var TEST_CASES = [
       t.eq(m.activations.length, 1, '激活条数');
       const a = m.activations[0];
       t.eq(a.part, 'B', '激活对象');
+      t.ok(a.endRow > a.startRow, 'deactivate 应闭合激活条（endRow > startRow）');
       t.ok(a.endY > a.startY, '激活条应有正高度');
+    }
+  },
+  {
+    name: '时序图：激活条必须显式声明（含第一条生命线）',
+    dsl: '@diagram sequence\nobject A\nobject B\nA -> B : 无激活也照常画',
+    check(m, t) {
+      t.eq(m.activations.length, 0, '没有 activate 就不该有激活条');
+      t.eq(m.messages.length, 1, '消息不受影响');
+    }
+  },
+  {
+    name: '时序图：deactivate 多余时忽略，不凭空造条',
+    dsl: '@diagram sequence\nobject A\nobject B\ndeactivate B\nA -> B : hi',
+    check(m, t) {
+      t.eq(m.activations.length, 0, '无 activate 的 deactivate 不应产生激活条');
+    }
+  },
+  {
+    name: '时序图：嵌套 activate 画在同一条生命线上',
+    dsl: '@diagram sequence\nobject A\nobject B\nactivate B\nA -> B : 1\nactivate B\nA -> B : 2\ndeactivate B\ndeactivate B',
+    check(m, t) {
+      t.eq(m.activations.length, 2, '两段激活条');
+      t.deepEq(m.activations.map(a => a.part), ['B', 'B'], '都在 B 上');
+      t.eq(m.activations[0].startRow < m.activations[1].startRow, true, '按声明顺序排列');
+      t.ok(m.activations[0].endRow > 0 && m.activations[1].endRow > 0, '都闭合');
+    }
+  },
+  {
+    name: '时序图：未闭合的 activate 自动延伸到末尾',
+    dsl: '@diagram sequence\nobject A\nobject B\nactivate B\nA -> B : hi',
+    check(m, t) {
+      t.eq(m.activations.length, 1, '一条');
+      t.ok(m.activations[0].endRow >= m.activations[0].startRow, 'endRow 被补到最后');
     }
   },
   {

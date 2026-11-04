@@ -567,7 +567,6 @@ function layoutSequence(model) {
   for (const a of model.activations) {
     a.startY = rowY(a.startRow) + ROW_H / 2;
     a.endY = a.endRow >= 0 ? rowY(a.endRow) + ROW_H / 2 : a.startY + ROW_H;
-    // 激活条层级偏移由参与者 x 在渲染时换算
     if (a.endRow > maxRow) maxRow = a.endRow;
   }
 
@@ -650,7 +649,7 @@ function applySeqLayout(model) {
   const pmapNow = new Map(model.participants.map(p => [p.ref, p]));
   for (const a of model.activations) {
     const part = pmapNow.get(a.part);
-    const cx = part ? part.x + (a.off || 0) * 7 : 0;
+    const cx = part ? part.x : 0;
     minX = Math.min(minX, cx - 12); maxX = Math.max(maxX, cx + 12);
     maxY = Math.max(maxY, a.endY);
   }

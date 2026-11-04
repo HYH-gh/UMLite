@@ -974,16 +974,8 @@ function seqMessageEl(m, partMap, activations) {
   if (!from || !to) return g;
   const y = m.y;
 
-  // 取某参与者在 m.row 时刻的激活条横向位置（取层级最深即 off 最大者）
-  const actX = (part, row) => {
-    let cx = part.x, bestOff = -Infinity, found = false;
-    for (const a of activations) {
-      if (a.part === part.ref && a.startRow <= row && row <= a.endRow && a.off >= bestOff) {
-        cx = part.x + (a.off || 0) * 7; bestOff = a.off; found = true;
-      }
-    }
-    return cx;
-  };
+  // 取某参与者在 m.row 时刻的激活条横向位置：都在生命线上，吸附参与者中心即可
+  const actX = (part, row) => part.x;
 
   if (m.self) {
     // 反身消息：向右延伸后折返回自身激活条/生命线
@@ -1094,7 +1086,7 @@ function buildSequenceContent(model) {
     const part = partMap.get(a.part);
     if (!part) continue;
     const w = 18;
-    const cx = part.x + (a.off || 0) * 7;
+    const cx = part.x;
     const topAct = Math.min(a.startY, a.endY);
     const hAct = Math.max(Math.abs(a.endY - a.startY), 8);
     const ag = el('g', { 'data-node-id': 'seq-act-' + i, 'data-seqkind': 'act', 'data-seqidx': i });
