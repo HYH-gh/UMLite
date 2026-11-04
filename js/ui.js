@@ -158,6 +158,33 @@ window.addEventListener('resize', () => {
   }, 160);
 });
 
+/* ---------------- 窄屏：代码 / 预览 标签切换 ---------------- */
+
+const paneTabs = document.getElementById('pane-tabs');
+
+function setMobilePane(which) {
+  if (document.body.dataset) document.body.dataset.pane = which;
+  else document.body.setAttribute('data-pane', which);
+  if (paneTabs) {
+    paneTabs.querySelectorAll('button[data-pane]').forEach((b) => {
+      b.setAttribute('aria-selected', b.getAttribute('data-pane') === which ? 'true' : 'false');
+    });
+  }
+  // 预览刚从隐藏切回来：此刻画布尺寸才有效，需要重新适配一次
+  if (which === 'preview' && currentModel) {
+    fitView();
+    paint();
+  }
+}
+
+if (paneTabs) {
+  paneTabs.addEventListener('click', (evt) => {
+    const btn = evt.target && evt.target.closest ? evt.target.closest('button[data-pane]') : null;
+    if (btn) setMobilePane(btn.getAttribute('data-pane'));
+  });
+  setMobilePane('code');
+}
+
 /* ---------------- 二级下拉菜单 ---------------- */
 function closeAllMenus() {
   document.querySelectorAll('.menu-drop.open').forEach(d => d.classList.remove('open'));

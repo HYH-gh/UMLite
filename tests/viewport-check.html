@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>UMLite · 视口宽度验证台</title>
+<style>
+  body{margin:0;background:#eef1f7;display:flex;gap:14px;padding:12px;font:12px system-ui,sans-serif;color:#475569;flex-wrap:wrap;}
+  figure{margin:0;display:flex;flex-direction:column;gap:4px;align-items:center;}
+  iframe{border:1px solid #94a3b8;border-radius:10px;background:#fff;box-shadow:0 6px 18px rgba(15,23,42,.12);}
+  .tip{background:#fff;border:1px solid #dde4ee;border-radius:10px;padding:10px 14px;max-width:520px;line-height:1.7;}
+  .tip code{font-family:Consolas,monospace;background:#f1f5f9;padding:1px 5px;border-radius:4px;}
+</style>
+</head>
+<body>
+<figure><iframe id="f-phone" width="390" height="844" src="../UMLite.html"></iframe><figcaption>390×844 · 代码页</figcaption></figure>
+<figure><iframe id="f-phone-preview" width="390" height="844" src="../UMLite.html"></iframe><figcaption>390×844 · 预览页 + 双指捏合</figcaption></figure>
+<figure><iframe id="f-small" width="360" height="640" src="../UMLite.html"></iframe><figcaption>360×640 · 代码页</figcaption></figure>
+
+<figure class="tip">
+  <b>这个页面是干什么的</b><br>
+  无头浏览器有最小窗口宽度（Chrome/Edge 约 500px），直接 <code>--window-size=390</code> 测不出手机宽度。
+  这里用 390 / 360 宽的 iframe 来真实触发 <code>@media (max-width:720px)</code>，
+  顺手在第二个框里跑一次「双指捏合」手势（结果写在它的状态栏里）。<br><br>
+  用桌面浏览器直接打开本页即可；若用无头模式做截图，需要加
+  <code>--allow-file-access-from-files</code>（第二个框要靠它跨 frame 调用）。
+</figure>
+
+<script>
+(function () {
+  'use strict';
+  // 在 390px 的预览框里跑一次双指手势，验证缩放链路（点位用框内坐标）
+  var PINCH = [
+    "setMobilePane('preview');",
+    "var before = view.zoom, pv = document.getElementById('preview');",
+    "function ev(t, id, x, y) { pv.dispatchEvent(new PointerEvent(t, {bubbles:true, cancelable:true, pointerType:'touch', pointerId:id, clientX:x, clientY:y, button:0, buttons:t==='pointerup'?0:1, isPrimary:id===1})); }",
+    "var cx = 195, cy = 420;",
+    "ev('pointerdown', 1, cx - 50, cy); ev('pointerdown', 2, cx + 50, cy);",
+    "ev('pointermove', 1, cx - 110, cy); ev('pointermove', 2, cx + 110, cy);",
+    "var ratio = view.zoom / before;",
+    "ev('pointerup', 1, cx - 110, cy); ev('pointerup', 2, cx + 110, cy);",
+    "fitView(); paint();",
+    "setStatus('双指捏合 x' + ratio.toFixed(2) + (ratio > 1.5 ? ' · ok' : ' · FAIL'));"
+  ].join('\n');
+
+  function onReady(fr, cb) {
+    var doc = fr.contentDocument;
+    if (doc && doc.readyState === 'complete' && doc.getElementById('preview')) cb(fr);
+    else fr.addEventListener('load', function () { setTimeout(function () { cb(fr); }, 250); });
+  }
+
+  onReady(document.getElementById('f-phone-preview'), function (fr) {
+    try { fr.contentWindow.eval(PINCH); }
+    catch (e) { fr.contentWindow.eval("setStatus('跨 frame 调用被浏览器拦截，请用 --allow-file-access-from-files 打开')"); }
+  });
+})();
+</script>
+</body>
+</html>

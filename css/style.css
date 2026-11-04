@@ -5,9 +5,13 @@
   }
   *{box-sizing:border-box;}
   html,body{height:100%;margin:0;}
+  /* 移动端浏览器地址栏会吃掉 100vh，dvh 才是可视高度 */
+  @supports (height:100dvh){ html,body{height:100dvh;} }
   body{
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
     background:var(--bg);color:var(--text);display:flex;flex-direction:column;overflow:hidden;
+    -webkit-tap-highlight-color:transparent;overscroll-behavior:none;
+    padding-top:env(safe-area-inset-top);padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);
   }
   header{
     display:flex;align-items:center;gap:10px;padding:8px 16px;background:var(--panel);
@@ -51,12 +55,15 @@
   #preview{
     flex:1;overflow:hidden;position:relative;cursor:default;
     display:block;
+    /* 手势自己处理（拖拽/双指缩放），别让浏览器把平移缩放抢走 */
+    touch-action:none;
   }
-  #preview svg{display:block;user-select:none;}
+  #preview svg{display:block;user-select:none;touch-action:none;}
   #status{
     flex:0 0 auto;padding:6px 14px;font-size:12px;border-top:1px solid var(--border);
     background:#fafbfe;color:var(--muted);font-family:"SF Mono",Menlo,Consolas,monospace;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    padding-bottom:calc(6px + env(safe-area-inset-bottom));
   }
   #status.ok{color:var(--ok);} #status.err{color:var(--err);background:#fef2f2;}
   .divider{
@@ -132,3 +139,62 @@
   .menu-btn{display:inline-flex;align-items:center;}
   .sel-ic{display:inline-flex;align-items:center;gap:4px;color:var(--muted);}
   .sel-ic .ic{margin-right:0;}
+
+  /* ---- 代码 / 预览 标签栏（窄屏才出现） ---- */
+  .mobile-tabs{display:none;}
+
+  /* ===================== 平板 / 窄桌面 ===================== */
+  @media (max-width:1024px){
+    header{gap:6px;padding:6px 10px;}
+    header button,header select{font-size:12px;padding:5px 9px;}
+    .logo small{display:none;}
+    .pane-head{padding:5px 10px;font-size:11px;flex-wrap:wrap;row-gap:4px;}
+    .pane-head .hint,.pane-head .badge{display:none;}
+    .pane-head button{padding:4px 9px !important;font-size:11.5px !important;}
+  }
+
+  /* ============ 手机竖屏 / 窄窗口：单栏 + 标签切换 ============ */
+  @media (max-width:720px){
+    .mobile-tabs{
+      display:flex;gap:6px;flex:0 0 auto;padding:6px 10px;
+      background:var(--panel);border-bottom:1px solid var(--border);
+    }
+    .mobile-tabs button{
+      flex:1;padding:9px 8px;font-size:13px;border-radius:9px;font-weight:600;
+      background:#f8fafc;color:var(--muted);transition:none;  /* 切换要立刻到位，不做过渡 */
+    }
+    /* 高亮跟着「哪个面板在显示」走，和 body[data-pane] 单一真相保持一致 */
+    body[data-pane="code"] .mobile-tabs button[data-pane="code"],
+    body[data-pane="preview"] .mobile-tabs button[data-pane="preview"]{
+      background:var(--accent);border-color:var(--accent);color:#fff;
+    }
+    .tab-ic{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:11px;opacity:.75;margin-right:4px;}
+    main{flex-direction:column;}
+    /* 单栏时谁显示谁占满剩余高度，否则 textarea 会塌成默认两行高 */
+    #left{width:auto;flex:1 1 auto;min-height:0;}
+    #right{flex:1 1 auto;min-height:0;}
+    .divider{display:none;}
+    body[data-pane="code"] #right{display:none;}
+    body[data-pane="preview"] #left{display:none;}
+    /* iOS 聚焦输入框时字号 <16px 会把整页放大 */
+    #editor{font-size:16px;padding:12px 14px;}
+    .pane-head{gap:6px;padding:6px 10px;}
+    .pane-head .badge,.pane-head .hint,.pane-head .fs-label{display:none;}
+    .pane-head button{padding:6px 9px !important;font-size:12px !important;}
+    .fs-wrap input[type=range]{width:64px;}
+    header{row-gap:6px;}
+    header button{padding:6px 8px;font-size:12px;}
+    header select{max-width:38vw;}
+    .lbl{display:none;}               /* 图标按钮只留图标，省宽度 */
+    .menu-drop{min-width:min(64vw,200px);}
+    .menu-item{padding:11px 12px;font-size:13.5px;}   /* 触屏点击区域 */
+    .history-panel{left:10px;right:10px;width:auto;top:auto;bottom:10px;max-height:60dvh;}
+    .his-item{padding:9px 8px;}
+    .his-del{width:26px;height:26px;}
+  }
+
+  /* ---------------- 横屏矮窗口：进一步压缩 ---------------- */
+  @media (max-height:460px){
+    .pane-head .badge,.fs-wrap{display:none;}
+    header{padding:4px 8px;}
+  }

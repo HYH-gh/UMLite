@@ -31,9 +31,31 @@ function setStatus(msg, cls = '') {
 function updateZoomInfo() {
   zoomInfo.textContent = Math.round(view.zoom * 100) + '%';
 }
+function syncViewportTransform() {
+  if (viewportEl) {
+    viewportEl.setAttribute('transform',
+      `translate(${view.panX},${view.panY}) scale(${view.zoom})`);
+  }
+}
+
+/* 以某个屏幕点为锚点缩放：该点下方的图形保持不动。
+   滚轮和双指缩放共用这一份数学，保证两种输入手感一致。 */
+function zoomAtClient(clientX, clientY, factor) {
+  if (!svgEl) return;
+  const v = clientToViewport(clientX, clientY);
+  const newZoom = clamp(view.zoom * factor, 0.06, 8);
+  const k = newZoom / view.zoom;
+  view.panX = v.x - (v.x - view.panX) * k;
+  view.panY = v.y - (v.y - view.panY) * k;
+  view.zoom = newZoom;
+  syncViewportTransform();
+  updateZoomInfo();
+}
 
 function fitView() {
   if (!currentModel) return;
+  // 窄屏切到代码页时预览是隐藏的（clientWidth 为 0），此时不重算，等切回来再算
+  if (!preview.clientWidth || !preview.clientHeight) return;
   const W = Math.max(preview.clientWidth, 200);
   const H = Math.max(preview.clientHeight, 200);
   const minX = currentModel.layoutMinX || 0;
@@ -138,16 +160,24 @@ function schedulePaint() {
 
 /* ---------------- 坐标换算 ---------------- */
 
-function clientToBase(clientX, clientY) {
+/* 屏幕坐标 → SVG 视口坐标（viewBox 单位） */
+function clientToViewport(clientX, clientY) {
   if (!svgEl) return { x: 0, y: 0 };
   const rect = svgEl.getBoundingClientRect();
   const sx = rect.width ? _vbW / rect.width : 1;
   const sy = rect.height ? _vbH / rect.height : 1;
-  const vx = (clientX - rect.left) * sx;
-  const vy = (clientY - rect.top) * sy;
   return {
-    x: (vx - view.panX) / view.zoom,
-    y: (vy - view.panY) / view.zoom
+    x: (clientX - rect.left) * sx,
+    y: (clientY - rect.top) * sy
+  };
+}
+
+function clientToBase(clientX, clientY) {
+  if (!svgEl) return { x: 0, y: 0 };
+  const v = clientToViewport(clientX, clientY);
+  return {
+    x: (v.x - view.panX) / view.zoom,
+    y: (v.y - view.panY) / view.zoom
   };
 }
 
@@ -456,36 +486,14 @@ function onBendDblClick(evt) {
   if (!currentModel) return;
   evt.stopPropagation();
   evt.preventDefault();
-  const ei = +evt.currentTarget.getAttribute('data-bend-edge');
-  const bi = +evt.currentTarget.getAttribute('data-bend-idx');
-  const e = currentModel.edges[ei];
-  if (e && e.bends) {
-    const before = undoSnapshot();   // 双击不是拖拽手势，手动拍快照
-    e.bends.splice(bi, 1);
-    if (!e.bends.length) { e.bends = null; e.aAnchor = undefined; e.bAnchor = undefined; }
-    commitUndo(before);
-    schedulePaint();
-    setStatus('已删除折点', 'ok');
-  }
+  deleteBendAt(+evt.currentTarget.getAttribute('data-bend-edge'),
+    +evt.currentTarget.getAttribute('data-bend-idx'));
 }
 
 function onCanvasDblClick(evt) {
-  if (!currentModel) return;
-  // 双击节点元素时不创建折点
-  if (evt.target && evt.target.closest && evt.target.closest('[data-node-id], [data-bend-edge]')) return;
-  const p = clientToBase(evt.clientX, evt.clientY);
-  const eps = 8 / Math.max(view.zoom, 0.0001);
-  const hit = closestOnEdge(currentModel, p, eps);
-  if (!hit) return;
-
-  const e = currentModel.edges[hit.ei];
-  const before = undoSnapshot();
-  if (!e.bends) e.bends = [];
-  // 落在第 seg 段，即在折点序列的 seg 位置插入
-  e.bends.splice(hit.seg, 0, { x: hit.q.x, y: hit.q.y });
-  commitUndo(before);
-  schedulePaint();
-  setStatus('已添加折点', 'ok');
+  // 触屏已经自己判过双击并处理了，别再重复插入一个折点
+  if (Date.now() - _lastTouchDoubleTapAt < 600) return;
+  onDoubleTap(evt.clientX, evt.clientY, evt.target);
 }
 
 document.addEventListener('pointermove', (evt) => {
@@ -608,25 +616,128 @@ document.addEventListener('pointercancel', () => {
 preview.addEventListener('wheel', (evt) => {
   if (!svgEl || !viewportEl) return;
   evt.preventDefault();
+  zoomAtClient(evt.clientX, evt.clientY, Math.exp(-evt.deltaY * 0.0016));
+}, { passive: false });
 
-  const rect = svgEl.getBoundingClientRect();
-  const sx = rect.width ? _vbW / rect.width : 1;
-  const sy = rect.height ? _vbH / rect.height : 1;
-  const mx = (evt.clientX - rect.left) * sx;
-  const my = (evt.clientY - rect.top) * sy;
+/* ==========================================================================
+ *  触屏手势
+ *  - 单指：拖元素 / 空白处平移（走已有的 Pointer Events 分支）
+ *  - 双指：捏合缩放，同时跟着两指中点平移
+ *  - 双击：加折点；双击折点：删除折点（触屏没有 dblclick 的可靠时序，自己判）
+ * ========================================================================== */
 
-  const factor = Math.exp(-evt.deltaY * 0.0016);
-  const newZoom = clamp(view.zoom * factor, 0.06, 8);
-  const k = newZoom / view.zoom;
+const touchPointers = new Map();   // pointerId -> 最近一次屏幕坐标
+let pinchState = null;
 
-  view.panX = mx - (mx - view.panX) * k;
-  view.panY = my - (my - view.panY) * k;
-  view.zoom = newZoom;
+function pinchCenter() {
+  const pts = Array.from(touchPointers.values());
+  return { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+}
+function pinchDistance() {
+  const pts = Array.from(touchPointers.values());
+  return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+}
 
-  viewportEl.setAttribute('transform',
-    `translate(${view.panX},${view.panY}) scale(${view.zoom})`);
+/* 第二根手指按下时，把单指拖拽状态全部丢弃，避免「拖一半又缩放」 */
+function cancelActiveDrags() {
+  dragState = panState = resizeState = lifeDragState = actEdgeDrag =
+    swimDragState = bendDragState = anchorDragState = seqDrag = null;
+  document.body.style.cursor = '';
+}
+
+preview.addEventListener('pointerdown', (evt) => {
+  if (evt.pointerType !== 'touch' && evt.pointerType !== 'pen') return;
+  touchPointers.set(evt.pointerId, { x: evt.clientX, y: evt.clientY });
+  if (touchPointers.size === 2 && svgEl) {
+    const c = pinchCenter();
+    const cv = clientToViewport(c.x, c.y);
+    cancelActiveDrags();
+    pinchState = {
+      dist0: pinchDistance(),
+      anchorX: cv.x - view.panX,   // 起始中点对应的世界坐标
+      anchorY: cv.y - view.panY,
+      zoom0: view.zoom
+    };
+  }
+}, true);
+
+document.addEventListener('pointermove', (evt) => {
+  if (!touchPointers.has(evt.pointerId)) return;
+  touchPointers.set(evt.pointerId, { x: evt.clientX, y: evt.clientY });
+  if (!pinchState || touchPointers.size < 2) return;
+  evt.preventDefault();
+
+  const c = clientToViewport(pinchCenter().x, pinchCenter().y);
+  const zoom = clamp(pinchState.zoom0 * (pinchDistance() / pinchState.dist0), 0.06, 8);
+  const k = zoom / pinchState.zoom0;
+  view.zoom = zoom;
+  // 世界锚点跟着两指中点走：缩放 + 平移一次算完
+  view.panX = c.x - pinchState.anchorX * k;
+  view.panY = c.y - pinchState.anchorY * k;
+  syncViewportTransform();
   updateZoomInfo();
 }, { passive: false });
+
+function endTouchPointer(evt) {
+  touchPointers.delete(evt.pointerId);
+  if (touchPointers.size < 2) pinchState = null;
+}
+document.addEventListener('pointerup', endTouchPointer);
+document.addEventListener('pointercancel', endTouchPointer);
+
+/* ---------------- 双击（触屏）：加 / 删折点 ---------------- */
+
+let lastTap = null;
+let _lastTouchDoubleTapAt = 0;
+
+function deleteBendAt(ei, bi) {
+  const e = currentModel && currentModel.edges && currentModel.edges[ei];
+  if (!e || !e.bends || !e.bends[bi]) return;
+  const before = undoSnapshot();
+  e.bends.splice(bi, 1);
+  if (!e.bends.length) { e.bends = null; e.aAnchor = undefined; e.bAnchor = undefined; }
+  commitUndo(before);
+  schedulePaint();
+  setStatus('已删除折点', 'ok');
+}
+
+/* 双击落点：折点上=删除，节点上=忽略，连线附近=插入折点 */
+function onDoubleTap(clientX, clientY, target) {
+  if (!currentModel) return;
+  const bendEl = target && target.closest && target.closest('[data-bend-edge]');
+  if (bendEl) {
+    deleteBendAt(+bendEl.getAttribute('data-bend-edge'), +bendEl.getAttribute('data-bend-idx'));
+    return;
+  }
+  if (target && target.closest && target.closest('[data-node-id]')) return;
+
+  const p = clientToBase(clientX, clientY);
+  const eps = 8 / Math.max(view.zoom, 0.0001);
+  const hit = closestOnEdge(currentModel, p, eps);
+  if (!hit) return;
+
+  const e = currentModel.edges[hit.ei];
+  const before = undoSnapshot();
+  if (!e.bends) e.bends = [];
+  e.bends.splice(hit.seg, 0, { x: hit.q.x, y: hit.q.y });
+  commitUndo(before);
+  schedulePaint();
+  setStatus('已添加折点', 'ok');
+}
+
+document.addEventListener('pointerup', (evt) => {
+  if (evt.pointerType !== 'touch' && evt.pointerType !== 'pen') return;
+  if (touchPointers.size) return;          // 双指松开的那一下不算双击
+  const now = Date.now();
+  const near = lastTap && Math.hypot(evt.clientX - lastTap.x, evt.clientY - lastTap.y) < 30;
+  if (near && now - lastTap.t < 320) {
+    lastTap = null;
+    _lastTouchDoubleTapAt = now;
+    onDoubleTap(evt.clientX, evt.clientY, evt.target);
+  } else {
+    lastTap = { t: now, x: evt.clientX, y: evt.clientY };
+  }
+});
 
 /* ==========================================================================
  *  主流程
@@ -659,7 +770,7 @@ function render(opts) {
     const count = model.type === 'sequence'
       ? model.participants.length + model.messages.length + model.activations.length + model.fragments.length
       : model.nodes.length;
-    setStatus(`✓ 渲染成功 · 类型：${model.type} · 元素数：${count} · 滚轮缩放 / 拖拽元素 / 空白处拖拽平移`, 'ok');
+    setStatus(`✓ 渲染成功 · 类型：${model.type} · 元素数：${count} · 滚轮/双指缩放 · 拖拽元素 / 空白处平移`, 'ok');
   } catch (err) {
     setStatus('✗ ' + err.message, 'err');
   }

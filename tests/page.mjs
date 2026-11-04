@@ -58,6 +58,7 @@ function makeFakeDom() {
       value: '',
       title: '',
       disabled: false,
+      dataset: {},
       _cls: new Set(),
       _ls: [],
       _text: '',
@@ -333,6 +334,95 @@ export function runPageSmoke() {
     if (btn.disabled) throw new Error('有可撤销步骤时按钮应可用');
     call('undo');
     if (!btn.disabled) throw new Error('撤销后按钮应重新禁用');
+  });
+
+  /* ---------------- 响应式 / 触屏手势 ---------------- */
+
+  const baseToClient = (b) => {
+    const v = g('view');
+    return { x: b.x * v.zoom + v.panX, y: b.y * v.zoom + v.panY };
+  };
+
+  run('缩放：锚点下方的图形保持不动（滚轮与双指共用同一份数学）', () => {
+    call('fitView');
+    const z0 = g('view').zoom;
+    const before = call('clientToBase', 400, 300);
+    call('zoomAtClient', 400, 300, 1.7);
+    const after = call('clientToBase', 400, 300);
+    if (Math.abs(before.x - after.x) > 0.5 || Math.abs(before.y - after.y) > 0.5) {
+      throw new Error(`锚点漂移 dx=${(after.x - before.x).toFixed(2)} dy=${(after.y - before.y).toFixed(2)}`);
+    }
+    call('zoomAtClient', 400, 300, 1 / 1.7);
+    if (Math.abs(g('view').zoom - z0) > 1e-6) throw new Error('缩放不可逆');
+  });
+
+  run('双指捏合：放大且跟随两指中点', () => {
+    call('fitView');
+    const z0 = g('view').zoom;
+    const preview = dom.document.getElementById('preview');
+    // 两指张开（左指不动，右指右移 100px，中点从 450 移到 500）
+    preview.fire('pointerdown', { pointerType: 'touch', pointerId: 1, clientX: 380, clientY: 300 });
+    preview.fire('pointerdown', { pointerType: 'touch', pointerId: 2, clientX: 520, clientY: 300 });
+    const world0 = call('clientToBase', 450, 300);
+    dom.document.fire('pointermove', { pointerType: 'touch', pointerId: 2, clientX: 620, clientY: 300 });
+
+    const z1 = g('view').zoom;
+    if (!(z1 > z0 * 1.5)) throw new Error(`双指张开应放大，zoom ${z0.toFixed(3)} → ${z1.toFixed(3)}`);
+    // 起始中点下的世界坐标，现在应落在两指新的中点下方
+    const world1 = call('clientToBase', 500, 300);
+    if (Math.abs(world1.x - world0.x) > 0.5 || Math.abs(world1.y - world0.y) > 0.5) {
+      throw new Error('捏合时没有跟随两指中点');
+    }
+    dom.document.fire('pointerup', { pointerType: 'touch', pointerId: 1, clientX: 380, clientY: 300 });
+    dom.document.fire('pointerup', { pointerType: 'touch', pointerId: 2, clientX: 620, clientY: 300 });
+    if (g('touchPointers.size') !== 0) throw new Error('抬手后指针表未清空');
+    if (g('pinchState') !== null) throw new Error('抬手后缩放状态未清空');
+    call('fitView');
+  });
+
+  run('双指落下时放弃单指拖拽', () => {
+    vm.runInContext('dragState = { node: currentModel.nodes[0], offsetX: 0, offsetY: 0, moved: false };', ctx);
+    const preview = dom.document.getElementById('preview');
+    preview.fire('pointerdown', { pointerType: 'touch', pointerId: 7, clientX: 300, clientY: 300 });
+    preview.fire('pointerdown', { pointerType: 'touch', pointerId: 8, clientX: 360, clientY: 300 });
+    if (g('dragState') !== null) throw new Error('第二根手指落下后仍在拖拽元素');
+    dom.document.fire('pointerup', { pointerType: 'touch', pointerId: 7, clientX: 300, clientY: 300 });
+    dom.document.fire('pointerup', { pointerType: 'touch', pointerId: 8, clientX: 360, clientY: 300 });
+    vm.runInContext('lastTap = null;', ctx);
+    call('fitView');
+  });
+
+  run('触屏双击：连线附近插入折点', () => {
+    editor().value = '@diagram class\nclass A\nclass B\nA --> B';
+    call('render', { force: true });
+    call('resetUndo');
+    vm.runInContext('lastTap = null;', ctx);
+    if (g('currentModel').edges[0].bends) throw new Error('前提：这条边本来没有折点');
+
+    // 沿着边扫一遍，找到一个真实落在连线上的点
+    const eps = 8 / Math.max(g('view').zoom, 0.0001);
+    let client = null;
+    for (let y = 20; y < 600 && !client; y += 4) {
+      for (let x = 20; x < 880; x += 4) {
+        if (call('closestOnEdge', g('currentModel'), { x, y }, eps)) { client = baseToClient({ x, y }); break; }
+      }
+    }
+    if (!client) throw new Error('没找到连线上的点');
+
+    dom.document.fire('pointerup', { pointerType: 'touch', pointerId: 11, clientX: client.x, clientY: client.y });
+    dom.document.fire('pointerup', { pointerType: 'touch', pointerId: 11, clientX: client.x, clientY: client.y });
+    const bends = g('currentModel').edges[0].bends;
+    if (!bends || bends.length !== 1) throw new Error('双击没有插入折点：' + JSON.stringify(bends));
+    if (g('undoStack.length') !== 1) throw new Error('插入折点应可以撤销');
+    call('undo');
+    if (g('currentModel').edges[0].bends) throw new Error('撤销后折点应消失');
+  });
+
+  run('窄屏标签切换：代码 / 预览 互斥显示', () => {
+    call('setMobilePane', 'preview');
+    if (dom.document.body.dataset.pane !== 'preview') throw new Error('未切到预览');
+    call('setMobilePane', 'code');
+    if (dom.document.body.dataset.pane !== 'code') throw new Error('未切回代码');
   });
 
   return results;

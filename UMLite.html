@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>UMLite · 文本驱动 UML 绘图工具</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
@@ -25,11 +25,11 @@
   <div class="spacer"></div>
 
   <button id="btn-writeback" title="把当前画布位置写回源码末尾">反写代码</button>
-  <button class="ghost" id="btn-undo" title="撤销（Ctrl+Z）" disabled>↶ 撤销</button>
-  <button class="ghost" id="btn-redo" title="重做（Ctrl+Shift+Z）" disabled>↷ 重做</button>
+  <button class="ghost" id="btn-undo" title="撤销（Ctrl+Z）" disabled>↶<span class="lbl"> 撤销</span></button>
+  <button class="ghost" id="btn-redo" title="重做（Ctrl+Shift+Z）" disabled>↷<span class="lbl"> 重做</span></button>
 
   <div class="menu">
-    <button type="button" class="ghost menu-btn"><svg class="ic"><use href="#ic-file"></use></svg>文件<span class="caret">▾</span></button>
+    <button type="button" class="ghost menu-btn"><svg class="ic"><use href="#ic-file"></use></svg><span class="lbl">文件</span><span class="caret">▾</span></button>
     <div class="menu-drop drop-right">
       <button type="button" class="menu-item" data-click="btn-open">导入 .uml…</button>
       <button type="button" class="menu-item" data-click="btn-copy">复制代码</button>
@@ -37,7 +37,7 @@
   </div>
 
   <div class="menu">
-    <button type="button" class="ghost menu-btn"><svg class="ic"><use href="#ic-export"></use></svg>导出<span class="caret">▾</span></button>
+    <button type="button" class="ghost menu-btn"><svg class="ic"><use href="#ic-export"></use></svg><span class="lbl">导出</span><span class="caret">▾</span></button>
     <div class="menu-drop">
       <button type="button" class="menu-item" data-click="btn-src">下载 .uml 源文件</button>
       <button type="button" class="menu-item" data-click="btn-svg">下载 SVG 矢量图</button>
@@ -45,15 +45,21 @@
     </div>
   </div>
 
-  <button class="ghost" id="btn-history" title="最近保存的图"><svg class="ic"><use href="#ic-history"></use></svg>历史</button>
+  <button class="ghost" id="btn-history" title="最近保存的图"><svg class="ic"><use href="#ic-history"></use></svg><span class="lbl">历史</span></button>
 
   <div class="menu">
-    <button type="button" class="ghost menu-btn"><svg class="ic"><use href="#ic-help"></use></svg>帮助<span class="caret">▾</span></button>
+    <button type="button" class="ghost menu-btn"><svg class="ic"><use href="#ic-help"></use></svg><span class="lbl">帮助</span><span class="caret">▾</span></button>
     <div class="menu-drop">
       <button type="button" class="menu-item" data-click="btn-doc">下载语言文档 (.md)</button>
     </div>
   </div>
 </header>
+
+<!-- 窄屏（≤720px）用标签切换代码与预览，避免两个面板都挤成一条 -->
+<nav id="pane-tabs" class="mobile-tabs" role="tablist" aria-label="面板切换">
+  <button type="button" role="tab" data-pane="code" aria-selected="true"><span class="tab-ic">&lt;/&gt;</span>代码</button>
+  <button type="button" role="tab" data-pane="preview" aria-selected="false"><span class="tab-ic">▦</span>预览</button>
+</nav>
 
 <!-- 被二级菜单收纳的真实按钮（保留 id，供菜单项 data-click 转发触发） -->
 <button id="btn-open" hidden></button>
