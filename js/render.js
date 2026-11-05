@@ -37,6 +37,10 @@ const SVG_CSS = `
 .arrow-line{stroke:#64748b;stroke-width:1.5;fill:none;stroke-linecap:round;}
 .diamond-fill{fill:#64748b;stroke:#64748b;stroke-width:1;}
 .diamond-open{fill:#ffffff;stroke:#64748b;stroke-width:1.6;}
+/* E-R 关系端点（鸦爪）：与 arrow-line 同色，保证各类连线观感统一 */
+.er-bar{stroke:#64748b;stroke-width:1.6;stroke-linecap:round;}
+.er-circle{fill:#ffffff;stroke:#64748b;stroke-width:1.5;}
+.er-foot{stroke:#64748b;stroke-width:1.5;fill:none;stroke-linecap:round;stroke-linejoin:round;}
 .title-text{font-family:${FONT};font-size:19px;font-weight:700;fill:#1e293b;}
 .mult-text{font-family:${FONT};font-size:11.5px;fill:#334155;}
 .seq-box{fill:#eef2ff;stroke:#6366f1;stroke-width:1.6;}
@@ -127,6 +131,45 @@ function addDiamond(g, tip, angle, filled) {
   }));
 }
 
+/* E-R 关系端点：鸦爪记法（crow's foot）
+   四种基数 — one / zeroOne / oneMany / zeroMany。
+   以 tip 为连线进入元素边框的点、angle 为「顺着连线指向元素」的方向，
+   局部坐标里 +x 指向元素内部，所有符号都向 -x 侧展开。 */
+const ER_MULT_KIND = {
+  '||': 'one', '1': 'one', '1..1': 'one',
+  'o|': 'zeroOne', '|o': 'zeroOne', '0..1': 'zeroOne',
+  '|{': 'oneMany', '{|': 'oneMany', '}|': 'oneMany', '1..*': 'oneMany', '1..n': 'oneMany',
+  'o{': 'zeroMany', '{o': 'zeroMany', '}o': 'zeroMany', '*': 'zeroMany', '0..*': 'zeroMany', 'n': 'zeroMany'
+};
+function erMultKind(tok) {
+  if (!tok) return null;
+  return ER_MULT_KIND[String(tok).replace(/\s+/g, '')] || null;
+}
+
+function addCrowsFoot(g, tip, angle, kind) {
+  const deg = (angle * 180) / Math.PI;
+  const gg = el('g', {
+    transform: `translate(${tip.x.toFixed(2)} ${tip.y.toFixed(2)}) rotate(${deg.toFixed(2)})`
+  });
+  const bar = (x) => el('line', { x1: x, y1: -6, x2: x, y2: 6, class: 'er-bar' });
+  const dot = (x) => el('circle', { cx: x, cy: 0, r: 4, class: 'er-circle' });
+  // 三根爪线：顶点在 x0（远离元素一侧），张开到 x1 处（贴元素边框）
+  const foot = (x0, x1) => el('path', {
+    d: `M ${x1} -6 L ${x0} 0 L ${x1} 6 M ${x0} 0 L ${x1} 0`,
+    class: 'er-foot'
+  });
+  if (kind === 'one') {
+    gg.appendChild(bar(-5)); gg.appendChild(bar(-10));
+  } else if (kind === 'zeroOne') {
+    gg.appendChild(dot(-15)); gg.appendChild(bar(-6));
+  } else if (kind === 'oneMany') {
+    gg.appendChild(bar(-4)); gg.appendChild(foot(-14, -5));
+  } else if (kind === 'zeroMany') {
+    gg.appendChild(dot(-16)); gg.appendChild(foot(-10, -1));
+  }
+  g.appendChild(gg);
+}
+
 function drawEdgeLabel(g, x, y, text) {
   if (!text) return;
   const w = textWidth(text, 12) + 10;
@@ -134,7 +177,7 @@ function drawEdgeLabel(g, x, y, text) {
   g.appendChild(el('text', { x, y: y + 1, 'text-anchor': 'middle', class: 'edge-label' }, text));
 }
 
-function drawEdge(g, e, nodeMap, edges) {
+function drawEdge(g, e, nodeMap, edges, erMode) {
   // 连线中点引用：notice ..> A--B 指向已有连线的中点
   if (e.connectToMidpoint) {
     const refA = nodeMap.get(e.connectToMidpoint.from);
@@ -189,6 +232,14 @@ function drawEdge(g, e, nodeMap, edges) {
     const sy = a.y - 6;
     const path = `M ${sx} ${sy} C ${sx + 58} ${sy - 42}, ${sx + 58} ${sy + 42}, ${sx} ${sy + 18}`;
     g.appendChild(el('path', { d: path, class: 'edge-line' + (e.dash ? ' edge-dashed' : '') }));
+    // 自引用（如 员工 ||--o{ 员工：管理）同样标注基数
+    if (erMode) {
+      const erA = erMultKind(e.fromMult), erB = erMultKind(e.toMult);
+      const angOut = Math.atan2(-42, 58);   // 起点离开元素的方向
+      const angIn = Math.atan2(-24, -58);   // 终点进入元素的方向
+      if (erA) addCrowsFoot(g, { x: sx, y: sy }, angOut + Math.PI, erA);
+      if (erB) addCrowsFoot(g, { x: sx, y: sy + 18 }, angIn, erB);
+    }
     if (e.label) drawEdgeLabel(g, sx + 62, sy + 6, e.label);
     return;
   }
@@ -222,11 +273,18 @@ function drawEdge(g, e, nodeMap, edges) {
   if (e.head && e.head !== 'none') addArrowHead(g, p2, angEnd, e.head);
   if (e.tailDiamond) addDiamond(g, p1, angStart, e.tailDiamond === 'filled');
 
-  if (e.fromMult) {
+  // E-R 基数：能识别的写法画鸦爪符号，其余（如 "1"、"m"）仍以文字标注
+  const erA = erMode ? erMultKind(e.fromMult) : null;
+  const erB = erMode ? erMultKind(e.toMult) : null;
+  const angAtStart = Math.atan2(startSegA.y - startSegB.y, startSegA.x - startSegB.x);
+
+  if (erA) addCrowsFoot(g, p1, angAtStart, erA);
+  else if (e.fromMult) {
     const x = startSegA.x + (startSegB.x - startSegA.x) * 0.18, y = startSegA.y + (startSegB.y - startSegA.y) * 0.18;
     g.appendChild(el('text', { x: x + 6, y: y - 6, class: 'mult-text' }, e.fromMult));
   }
-  if (e.toMult) {
+  if (erB) addCrowsFoot(g, p2, angEnd, erB);
+  else if (e.toMult) {
     const x = endSegA.x + (endSegB.x - endSegA.x) * 0.82, y = endSegA.y + (endSegB.y - endSegA.y) * 0.82;
     g.appendChild(el('text', { x: x - 6, y: y - 6, class: 'mult-text', 'text-anchor': 'end' }, e.toMult));
   }
@@ -833,7 +891,7 @@ function buildGraphContent(model) {
 
   for (let i = 0; i < model.edges.length; i++) {
     const e = model.edges[i];
-    drawEdge(gEdges, e, nodeMap, model.edges);
+    drawEdge(gEdges, e, nodeMap, model.edges, model.type === 'er');
     // 折点命中区（透明不可见，用于拖动/删除折点）
     if (e.bends && e.bends.length) {
       for (let k = 0; k < e.bends.length; k++) {

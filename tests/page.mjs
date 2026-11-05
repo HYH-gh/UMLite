@@ -175,6 +175,18 @@ function scanSvg(root) {
   return { els, tagged, bad };
 }
 
+/* 按 class 分词计数：countClass(root, 'er-bar') → 该类的元素个数 */
+function countClass(root, token) {
+  let n = 0;
+  (function walk(node) {
+    if (!node || typeof node !== 'object') return;
+    const cls = node.attrs && node.attrs.class;
+    if (cls && String(cls).split(/\s+/).indexOf(token) >= 0) n++;
+    for (const c of node.children || []) walk(c);
+  })(root);
+  return n;
+}
+
 export function runPageSmoke() {
   const results = [];
   const run = (name, fn) => {
@@ -268,6 +280,39 @@ export function runPageSmoke() {
       if (s.els < 5) throw new Error(name + '：SVG 元素过少（' + s.els + '）');
       if (s.bad.length) throw new Error(name + '：SVG 属性含非法值 ' + s.bad.slice(0, 3).join(', '));
     }
+  });
+
+  run('ER 关系：基数画成鸦爪符号，不再重复标文字', () => {
+    editor().value = '@diagram er\nentity A\nentity B\nentity C\nA ||--|| B : 一对一\nB ||--o{ C : 一对多';
+    call('render', { force: true });
+    const svg = firstSvg();
+    if (!svg) throw new Error('没有 svg');
+    // 一对一：两端各两条竖线 → 4 条 er-bar，无爪线、无圆圈
+    // 一对多可选：A 端 2 条竖线 + B 端 1 圆圈 + 1 爪线
+    const bars = countClass(svg, 'er-bar');
+    const feet = countClass(svg, 'er-foot');
+    const dots = countClass(svg, 'er-circle');
+    if (bars !== 6) throw new Error('er-bar 应为 6 条，实际 ' + bars);   // 4 + 2
+    if (feet !== 1) throw new Error('er-foot 应为 1 条，实际 ' + feet);
+    if (dots !== 1) throw new Error('er-circle 应为 1 个，实际 ' + dots);
+    if (countClass(svg, 'mult-text') !== 0) throw new Error('已画符号却还留着文字基数');
+  });
+
+  run('ER 关系：自引用也标注基数', () => {
+    editor().value = '@diagram er\nentity 员工\n员工 ||--o{ 员工 : 管理';
+    call('render', { force: true });
+    const svg = firstSvg();
+    if (countClass(svg, 'er-bar') !== 2) throw new Error('自引用应有 2 条竖线');
+    if (countClass(svg, 'er-foot') !== 1) throw new Error('自引用应有 1 条爪线');
+    if (countClass(svg, 'er-circle') !== 1) throw new Error('自引用应有 1 个圆圈');
+  });
+
+  run('类图多重度仍用文字（不被 ER 鸦爪接管）', () => {
+    editor().value = '@diagram class\nclass A\nclass B\nA "1" --> "*" B';
+    call('render', { force: true });
+    const svg = firstSvg();
+    if (countClass(svg, 'mult-text') !== 2) throw new Error('类图多重度文字应保留 2 处');
+    if (countClass(svg, 'er-bar') + countClass(svg, 'er-foot')) throw new Error('类图不该出现鸦爪符号');
   });
 
   run('反写代码：位置块可写入源码', () => {

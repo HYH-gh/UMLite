@@ -11,7 +11,7 @@
 - **纯前端，零依赖** — 单个 `.html` 文件，双击即用，离线可用
 - **实时渲染** — 编辑代码即刻预览，无需手动触发
 - **增量渲染** — 只改注释、空行时自动跳过重排：画布不跳动，手动拖出来的坐标也不会被打字冲掉；结构变化才重新布局，且布局结果可复现（无随机数）
-- **可测试** — 自带 32 条 DSL 断言 + 页面级冒烟，`node tests/run.mjs` 一条命令跑完，也可在浏览器打开 `tests/index.html`
+- **可测试** — 自带 36 条 DSL 断言 + 19 项页面级冒烟，`node tests/run.mjs` 一条命令跑完，也可在浏览器打开 `tests/index.html`
 - **10 种 UML 图** — 类图、用例图、活动图、时序图、E-R 图、状态图、组件图、部署图、对象图、包图
 - **力导向布局** — 元素自动排布，无需手动指定坐标
 - **交互式画布** — 拖拽元素、滚轮缩放、空白处拖拽平移
@@ -68,7 +68,7 @@ Hello --> World : greet
 | 类图 | `class` | 类、接口、抽象类、枚举、继承、实现 |
 | 用例图 | `usecase` | 角色、用例、系统边界框 |
 | 活动图 | `activity` | 起始/结束节点、判断、分支、循环、备注 |
-| E-R 图 | `er` | 实体、字段定义、Chen 记法关系 |
+| E-R 图 | `er` | 实体、字段定义、Chen 记法关系（基数画成鸦爪符号） |
 | 时序图 | `sequence` | 参与者、同步/返回消息 |
 | 状态图 | `state` | 状态、迁移、起始/终止伪状态 |
 | 组件图 | `component` | 组件、依赖关系 |
@@ -108,7 +108,7 @@ Hello --> World : greet
 **类图：** `class 名称 { 成员 }` / `interface 名称 { 成员 }` / `abstract class 名称`
 **用例图：** `actor 角色` / `usecase 用例 [:boundary]` / `boundary "系统名称"` / 业务模型：`business actor 业务角色` / `business usecase 业务用例`
 **活动图：** `start` / `:动作;` / `if(条件)`...`endif` / `while`...`endwhile` / `note:文本` / 泳道 `in "泳道名"` / 活动边 `edge`
-**E-R 图：** `entity 名称 { * 字段 }` / `||--o{` / `||--|{` / `||--||`
+**E-R 图：** `entity 名称 { * 字段 }` / `||--o{` 一对多 / `||--|{` 强制一对多 / `||--||` 一对一 / `||--o|` 一对零或一
 **时序图：** `actor/object/control/entity/boundary 名称` / `A -> B : 消息` / `A --> B : 返回` / `activate A` / `deactivate A` / `alt ... else ... end` / `loop` / `opt` / `ref` / 业务参与者：`business actor/object/control/entity/boundary/worker 名称`
 
 **位置代码（`@layout` 块，附加在代码末尾）：**
@@ -222,7 +222,7 @@ UMLite.html ─┬─ css/style.css
 零依赖、零安装，两种跑法：
 
 ```bash
-node tests/run.mjs      # 全部：32 条 DSL 断言 + 16 项页面级冒烟
+node tests/run.mjs      # 全部：36 条 DSL 断言 + 19 项页面级冒烟
 node tests/page.mjs     # 只跑页面级冒烟
 ```
 
