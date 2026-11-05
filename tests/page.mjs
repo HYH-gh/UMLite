@@ -33,6 +33,8 @@ const PAGE_SCRIPTS = [
   'js/ui.js',
   'js/samples.js',
   'js/history.js',
+  'js/changelog.js',
+  'js/notice.js',
   'js/main.js'
 ];
 
@@ -194,7 +196,7 @@ export function runPageSmoke() {
     catch (e) { results.push({ name, ok: false, fails: [String((e && e.message) || e)] }); }
   };
 
-  const { ctx, dom } = makeFakeDom();
+  const { ctx, dom, sandbox } = makeFakeDom();
   try {
     for (const rel of PAGE_SCRIPTS) {
       vm.runInContext(fs.readFileSync(path.join(ROOT, rel), 'utf8'), ctx, { filename: rel });
@@ -468,6 +470,42 @@ export function runPageSmoke() {
     if (dom.document.body.dataset.pane !== 'preview') throw new Error('未切到预览');
     call('setMobilePane', 'code');
     if (dom.document.body.dataset.pane !== 'code') throw new Error('未切回代码');
+  });
+
+  /* ---------------- 版本号 / 更新公告 ---------------- */
+
+  const mask = () => dom.document.getElementById('notice-mask');
+  const chip = () => dom.document.getElementById('ver-chip');
+  const SEEN = 'umlite.seenVersion';
+
+  run('更新公告：首次打开自动弹出并记住版本', () => {
+    // 页面脚本加载时已经跑过一次 maybeAnnounce()
+    if (!mask().classList.contains('is-open')) throw new Error('首次打开应自动弹出公告');
+    if (sandbox.localStorage.getItem(SEEN) !== g('APP_VERSION')) {
+      throw new Error('已读版本未写入 localStorage：' + sandbox.localStorage.getItem(SEEN));
+    }
+    const html = dom.document.getElementById('notice-body').innerHTML;
+    if (html.indexOf('v' + g('APP_VERSION')) < 0) throw new Error('弹窗里没有当前版本号');
+    if (html.indexOf('历史版本') < 0) throw new Error('弹窗里没有历史版本区');
+  });
+
+  run('更新公告：同版本再次访问不自动弹', () => {
+    call('closeNotice');
+    if (mask().classList.contains('is-open')) throw new Error('关闭后仍是打开状态');
+    if (call('maybeAnnounce') !== false) throw new Error('同版本不应再次弹出');
+    if (mask().classList.contains('is-open')) throw new Error('同版本却弹出了公告');
+  });
+
+  run('更新公告：版本变化后重新弹出一次', () => {
+    sandbox.localStorage.setItem(SEEN, '1.0');   // 假装上次看的是很老的版本
+    if (call('maybeAnnounce') !== true) throw new Error('新版本应自动弹出');
+    if (!mask().classList.contains('is-open')) throw new Error('新版本没有弹出公告');
+    if (sandbox.localStorage.getItem(SEEN) !== g('APP_VERSION')) throw new Error('新版本未记为已读');
+    call('closeNotice');
+    // 点版本号可以随时再打开
+    chip().fire('click');
+    if (!mask().classList.contains('is-open')) throw new Error('点版本号没有打开公告');
+    call('closeNotice');
   });
 
   return results;

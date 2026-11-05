@@ -11,6 +11,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 import { runPageSmoke } from './page.mjs';
+import { runReleaseChecks } from './release.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -93,7 +94,11 @@ console.log('\n页面级冒烟（假 DOM 里跑完整页面）');
 const page = runPageSmoke();
 report(page);
 
-const total = results.length + page.length;
+console.log('\n发布一致性（版本号 / 更新文档 / 页面数据）');
+const release = runReleaseChecks();
+report(release);
+
+const total = results.length + page.length + release.length;
 console.log('');
 if (failed) {
   console.log(`\u001b[31m${failed} 项失败\u001b[0m / 共 ${total} 项（${ms}ms）`);

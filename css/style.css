@@ -59,13 +59,25 @@
     touch-action:none;
   }
   #preview svg{display:block;user-select:none;touch-action:none;}
+  /* 底部状态栏：左边是渲染状态，右边常驻版本号 */
+  #statusbar{
+    flex:0 0 auto;display:flex;align-items:center;gap:8px;
+    border-top:1px solid var(--border);background:#fafbfe;
+    padding-right:10px;padding-bottom:env(safe-area-inset-bottom);
+  }
   #status{
-    flex:0 0 auto;padding:6px 14px;font-size:12px;border-top:1px solid var(--border);
-    background:#fafbfe;color:var(--muted);font-family:"SF Mono",Menlo,Consolas,monospace;
+    flex:1 1 auto;min-width:0;padding:6px 14px;font-size:12px;
+    color:var(--muted);font-family:"SF Mono",Menlo,Consolas,monospace;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-    padding-bottom:calc(6px + env(safe-area-inset-bottom));
   }
   #status.ok{color:var(--ok);} #status.err{color:var(--err);background:#fef2f2;}
+  /* 版本号：角落里的胶囊按钮 */
+  .ver-chip{
+    flex:none;padding:2px 9px;font-size:11px;line-height:16px;border-radius:999px;
+    font-family:"SF Mono",Menlo,Consolas,monospace;color:var(--muted);
+    background:#eef2f8;border:1px solid var(--border);cursor:pointer;
+  }
+  .ver-chip:hover{background:#e2e8f5;border-color:var(--accent);color:var(--accent);}
   .divider{
     width:5px;cursor:col-resize;flex:0 0 auto;background:var(--border);
     position:relative;z-index:10;transition:background .15s;
@@ -140,6 +152,62 @@
   .sel-ic{display:inline-flex;align-items:center;gap:4px;color:var(--muted);}
   .sel-ic .ic{margin-right:0;}
 
+  /* ---- 更新公告弹窗 ---- */
+  .notice-mask{
+    position:fixed;inset:0;z-index:200;display:none;align-items:center;justify-content:center;
+    background:rgba(15,23,42,.42);padding:24px;
+  }
+  .notice-mask.is-open{display:flex;}
+  .notice{
+    width:min(560px,92vw);max-height:min(76vh,660px);display:flex;flex-direction:column;
+    background:var(--panel);border-radius:14px;border:1px solid var(--border);
+    box-shadow:0 24px 60px rgba(15,23,42,.28);overflow:hidden;
+  }
+  .notice-head{
+    display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border);
+    background:linear-gradient(180deg,#fbfcff,#f5f7fd);
+  }
+  .notice-head h2{margin:0;font-size:15px;font-weight:800;letter-spacing:.5px;}
+  .notice-close{
+    margin-left:auto;width:28px;height:28px;padding:0;line-height:1;font-size:18px;
+    border:1px solid transparent;background:transparent;color:var(--muted);border-radius:8px;
+  }
+  .notice-close:hover{background:#eef2f8;color:var(--text);}
+  .notice-body{padding:14px 18px 6px;overflow-y:auto;font-size:13px;line-height:1.75;color:var(--text);}
+  .notice-hero{display:flex;align-items:baseline;gap:8px;margin-bottom:8px;}
+  .notice-ver{
+    font-size:20px;font-weight:800;letter-spacing:.5px;
+    background:linear-gradient(90deg,var(--accent),var(--accent2));
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  .notice-date{font-size:11.5px;color:var(--muted);font-family:"SF Mono",Menlo,Consolas,monospace;}
+  .notice-list{margin:0 0 10px;padding-left:18px;}
+  .notice-list li{margin:3px 0;}
+  .notice-list code{
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:11.5px;
+    background:#f1f5f9;border-radius:4px;padding:1px 4px;
+  }
+  .notice-sub{font-size:12px;color:var(--muted);margin:14px 0 6px;font-weight:700;letter-spacing:.5px;}
+  .notice-old{border-top:1px dashed var(--border);padding:7px 0;}
+  .notice-old summary{cursor:pointer;font-size:12.5px;color:var(--muted);font-weight:600;list-style:none;}
+  .notice-old summary::-webkit-details-marker{display:none;}
+  .notice-old summary::before{content:"▸ ";color:var(--accent);}
+  .notice-old[open] summary::before{content:"▾ ";}
+  .notice-old summary:hover{color:var(--accent);}
+  .notice-old-date{margin-left:8px;font-size:11px;opacity:.75;font-family:"SF Mono",Menlo,Consolas,monospace;}
+  .notice-old .notice-list{margin-top:6px;font-size:12.5px;}
+  .notice-empty{margin:6px 0 10px;color:var(--muted);}
+  .notice-foot{
+    display:flex;align-items:center;gap:10px;padding:12px 18px;border-top:1px solid var(--border);
+    background:#fbfcff;padding-bottom:calc(12px + env(safe-area-inset-bottom));
+  }
+  .notice-tip{font-size:11px;color:var(--muted);}
+  .notice-ok{
+    margin-left:auto;padding:7px 18px;font-size:12.5px;font-weight:600;
+    background:var(--accent);border-color:var(--accent);color:#fff;
+  }
+  .notice-ok:hover{background:#3f5ce8;border-color:#3f5ce8;color:#fff;}
+
   /* ---- 代码 / 预览 标签栏（窄屏才出现） ---- */
   .mobile-tabs{display:none;}
 
@@ -191,6 +259,13 @@
     .history-panel{left:10px;right:10px;width:auto;top:auto;bottom:10px;max-height:60dvh;}
     .his-item{padding:9px 8px;}
     .his-del{width:26px;height:26px;}
+    /* 公告弹窗在手机上铺满，按钮也放大便于点 */
+    .notice-mask{padding:10px;}
+    .notice{width:100%;max-height:86dvh;}
+    .notice-head{padding:12px 14px;}
+    .notice-body{padding:12px 14px 4px;font-size:13.5px;}
+    .notice-foot{padding:10px 14px;flex-wrap:wrap;}
+    .notice-ok{padding:9px 20px;}
   }
 
   /* ---------------- 横屏矮窗口：进一步压缩 ---------------- */

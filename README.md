@@ -1,8 +1,12 @@
 # UMLite · 文本驱动 UML 绘图工具
 
+`v1.20`　`零依赖`　`离线可用`　`MIT`
+
 **UMLite** 是一个纯前端、文本驱动的 UML 绘图工具。你只需在左侧编辑器中书写简单的文本描述，右侧预览区域便会**实时**渲染出对应的 UML 图形。无需安装、无需注册、无需网络，一个 HTML 文件搞定所有 UML 绘图需求。
 
 > 📄 **一句话用法**：打开 `UMLite.html` → 写代码 → 自动出图 → 导出 PNG / SVG。
+>
+> 🔔 **更新公告**：点页面右下角的版本号 `v1.20` 可查看历次更新；首次打开（或版本变化后）会自动弹出一次，已读记录存在浏览器本地。完整日志见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
 
 ---
 
@@ -11,7 +15,7 @@
 - **纯前端，零依赖** — 单个 `.html` 文件，双击即用，离线可用
 - **实时渲染** — 编辑代码即刻预览，无需手动触发
 - **增量渲染** — 只改注释、空行时自动跳过重排：画布不跳动，手动拖出来的坐标也不会被打字冲掉；结构变化才重新布局，且布局结果可复现（无随机数）
-- **可测试** — 自带 36 条 DSL 断言 + 19 项页面级冒烟，`node tests/run.mjs` 一条命令跑完，也可在浏览器打开 `tests/index.html`
+- **可测试** — 自带 36 条 DSL 断言 + 22 项页面级冒烟 + 4 项发布一致性检查，`node tests/run.mjs` 一条命令跑完，也可在浏览器打开 `tests/index.html`
 - **10 种 UML 图** — 类图、用例图、活动图、时序图、E-R 图、状态图、组件图、部署图、对象图、包图
 - **力导向布局** — 元素自动排布，无需手动指定坐标
 - **交互式画布** — 拖拽元素、滚轮缩放、空白处拖拽平移
@@ -205,6 +209,8 @@ UMLite.html ─┬─ css/style.css
                  ui.js           顶栏、导入、反写代码、分隔条、菜单
                  samples.js      10 个内置示例
                  history.js      localStorage 历史记录
+                 changelog.js    更新日志数据（由 docs/CHANGELOG.md 生成，勿手改）
+                 notice.js       版本号胶囊 + 更新公告弹窗
                  main.js         启动
 ```
 
@@ -222,8 +228,9 @@ UMLite.html ─┬─ css/style.css
 零依赖、零安装，两种跑法：
 
 ```bash
-node tests/run.mjs      # 全部：36 条 DSL 断言 + 19 项页面级冒烟
-node tests/page.mjs     # 只跑页面级冒烟
+node tests/run.mjs        # 全部：36 条 DSL 断言 + 22 项页面冒烟 + 4 项发布一致性
+node tests/page.mjs       # 只跑页面级冒烟
+node tests/release.mjs    # 只跑版本号 / 更新文档一致性
 ```
 
 也可以直接双击 `tests/index.html` 在浏览器里看结果（与 node 共用同一套用例）。
@@ -232,12 +239,36 @@ node tests/page.mjs     # 只跑页面级冒烟
 |---|---|
 | `tests/cases.js` | DSL 用例：10 种图、关系运算符、`@layout`、布局质量 |
 | `tests/harness.js` | 断言收集器；每条用例还会自动附加三项不变量 — 几何数值必须有限、布局必须可复现、`@layout` 往返不得漂移 |
-| `tests/page.mjs` | 在假 DOM 里按页面顺序加载全部脚本，验证启动渲染、增量跳过、10 个示例、反写回环、撤销/重做栈 |
+| `tests/page.mjs` | 在假 DOM 里按页面顺序加载全部脚本，验证启动渲染、增量跳过、10 个示例、反写回环、撤销/重做栈、更新公告 |
+| `tests/release.mjs` | 发布一致性：版本号格式与顺序、`js/changelog.js` 与文档同步、README / 页面标签对得上 |
 | `tests/run.mjs` | node 运行器（vm + 最小 DOM 桩），退出码可直接挂 CI |
 | `test-elements.html` | 元素视觉清单页（人工看图形样式，非自动断言） |
 | `tests/viewport-check.html` | 视口验证台：390 / 360 宽 iframe 触发窄屏断点，并跑一次双指捏合 |
 
 新增语法或图形时，在 `tests/cases.js` 里补一条用例即可 —— 顺手就能发现方向、多重度、往返这类肉眼容易漏掉的问题（E-R 关系方向的不一致就是这样被抓出来的）。
+
+---
+
+## 🔖 版本号与更新公告
+
+版本号形如 `1.XX`，其中 **`XX` 就是 git 提交次数**（`git rev-list --count HEAD`）。第 20 次提交即 `v1.20`，以此类推，不用手工维护主次版本。
+
+发出一次更新时走三步：
+
+```bash
+# 1. 在 docs/CHANGELOG.md 顶部加一节（版本号 = 当前提交数 + 1）
+# 2. 生成页面数据（js/changelog.js 已提交，勿手改）
+node tools/sync-changelog.mjs
+# 3. 确认四处对齐：更新文档 / 页面数据 / README 版本号 / 页面胶囊按钮
+node tests/run.mjs
+```
+
+页面这一侧：
+
+- 右下角常驻版本号胶囊，点开即可查看当前版本的更新内容与全部历史版本
+- 首次打开、或版本号比上次看过的更新时自动弹出一次；已读版本记在 `localStorage`（键 `umlite.seenVersion`），之后不再打扰
+- 内容来自 `js/changelog.js`，由 `docs/CHANGELOG.md` 生成 —— 运行时零依赖、`file://` 直接打开也能读（本地 md 会被 CORS 拦住，所以转成 JS 数据）
+- `tests/release.mjs` 会卡住版本号不同步的提交，避免页面写着旧版本、公告却停在上一版
 
 ---
 

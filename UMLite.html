@@ -101,7 +101,25 @@
   </div>
 </main>
 
-<div id="status">就绪</div>
+<footer id="statusbar">
+  <div id="status">就绪</div>
+  <button type="button" id="ver-chip" class="ver-chip">v1.20</button>
+</footer>
+
+<!-- 更新公告：首次打开自动弹，之后点右下角版本号查看 -->
+<div id="notice-mask" class="notice-mask" aria-hidden="true">
+  <div class="notice" role="dialog" aria-modal="true" aria-labelledby="notice-title">
+    <div class="notice-head">
+      <h2 id="notice-title">更新公告</h2>
+      <button type="button" id="notice-close" class="notice-close" aria-label="关闭">×</button>
+    </div>
+    <div class="notice-body" id="notice-body"></div>
+    <div class="notice-foot">
+      <span class="notice-tip">更新内容随代码提交同步维护</span>
+      <button type="button" id="notice-ok" class="notice-ok">知道了</button>
+    </div>
+  </div>
+</div>
 
 
   <script src="js/util.js"></script>
@@ -116,6 +134,8 @@
   <script src="js/ui.js"></script>
   <script src="js/samples.js"></script>
   <script src="js/history.js"></script>
+  <script src="js/changelog.js"></script>
+  <script src="js/notice.js"></script>
   <script src="js/main.js"></script>
 </body>
 </html>
