@@ -36,6 +36,11 @@ function loadUml(file) {
   const r = new FileReader();
   r.onload = () => {
     if (typeof r.result !== 'string') return;
+    // 单图导入：进当前选中的目录（没有选中就是根目录），逻辑与以前一样，只是一次多建一个文件
+    if (typeof fsImportSingle === 'function') {
+      fsImportSingle(r.result, file.name);
+      return;
+    }
     editor.value = r.result;
     render();
     setStatus(`已导入 ${file.name} 并渲染`, 'ok');
@@ -98,6 +103,99 @@ bind('btn-doc', async () => {
   } catch (e) {
     setStatus('文档加载失败：请通过本地服务器访问', 'err');
   }
+});
+
+/* ---------------- 整个项目导入 / 导出 ---------------- */
+
+/* 通用选择弹窗：resolve 被点按钮的 id，取消则 null */
+function askChoice(opts) {
+  return new Promise((resolve) => {
+    const mask = document.getElementById('ask-mask');
+    const titleEl = document.getElementById('ask-title');
+    const msgEl = document.getElementById('ask-msg');
+    const extraEl = document.getElementById('ask-extra');
+    const actions = document.getElementById('ask-actions');
+    const cancel = document.getElementById('ask-cancel');
+    if (!mask || !actions) { resolve(opts.buttons[0] ? opts.buttons[0].id : null); return; }
+    if (titleEl) titleEl.textContent = opts.title || '请选择';
+    if (msgEl) msgEl.textContent = opts.message || '';
+    if (extraEl) {
+      extraEl.textContent = opts.extra || '';
+      extraEl.style.display = opts.extra ? '' : 'none';
+    }
+    actions.innerHTML = '';
+    let closed = false;
+    const close = (val) => {
+      if (closed) return;
+      closed = true;
+      mask.classList.remove('is-open');
+      mask.setAttribute('aria-hidden', 'true');
+      resolve(val);
+    };
+    for (const b of opts.buttons) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ask-btn' + (b.primary ? ' primary' : '');
+      btn.textContent = b.label;
+      btn.addEventListener('click', () => close(b.id));
+      actions.appendChild(btn);
+    }
+    if (cancel) cancel.onclick = () => close(null);
+    mask.classList.add('is-open');
+    mask.setAttribute('aria-hidden', 'false');
+  });
+}
+
+const projInput = document.getElementById('file-project');
+bind('btn-proj-open', () => projInput && projInput.click());
+if (projInput) projInput.addEventListener('change', () => {
+  const f = projInput.files && projInput.files[0];
+  if (f) loadProject(f);
+  projInput.value = '';
+});
+
+function loadProject(file) {
+  const r = new FileReader();
+  r.onload = async () => {
+    let data, preview;
+    try {
+      data = JSON.parse(String(r.result));
+    } catch (e) {
+      setStatus('项目文件不是有效的 JSON', 'err');
+      return;
+    }
+    try {
+      preview = fsParseProject(data);
+    } catch (e) {
+      setStatus('导入失败：' + e.message, 'err');
+      return;
+    }
+    const count = fsCountFiles(preview);
+    const mode = await askChoice({
+      title: '导入项目',
+      message: `「${preview.name}」共 ${count} 张图，要怎么并入当前内容？`,
+      extra: '覆盖：清空现在的目录，只留导入的这一套\n插入：保留现有内容，把导入的当成一个子目录',
+      buttons: [
+        { id: 'insert', label: '作为子目录插入', primary: true },
+        { id: 'overwrite', label: '覆盖当前内容' }
+      ]
+    });
+    if (!mode) { setStatus('已取消导入', 'ok'); return; }
+    const res = fsImportProject(data, mode);
+    setStatus(mode === 'overwrite'
+      ? `已用导入的项目覆盖当前内容（${res.count} 张图）`
+      : `已插入子目录「${res.name}」（${res.count} 张图）`, 'ok');
+  };
+  r.onerror = () => setStatus('文件读取失败', 'err');
+  r.readAsText(file, 'utf-8');
+}
+
+bind('btn-proj-save', () => {
+  if (typeof fsExportProject !== 'function') return;
+  if (typeof fsSyncCurrent === 'function') fsSyncCurrent();
+  const data = fsExportProject();
+  saveBlob(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' }), 'umlite-project.json');
+  setStatus(`已导出整个项目（${fsCountFiles(fsRoot)} 张图）`, 'ok');
 });
 
 bind('btn-reset', () => {

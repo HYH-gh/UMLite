@@ -745,6 +745,8 @@ document.addEventListener('pointerup', (evt) => {
 
 function render(opts) {
   const src = document.getElementById('editor').value;
+  // 编辑器内容写回当前文件（文件树里那一行的名字/图标跟着代码走）
+  if (typeof fsTouchCurrent === 'function') fsTouchCurrent();
   try {
     const built = buildModel(src, {
       previous: _lastBuild,

@@ -464,7 +464,13 @@ for (const name of Object.keys(SAMPLES)) {
 sampleSelect.addEventListener('change', () => {
   const name = sampleSelect.value;
   if (!name) return;
-  editor.value = SAMPLES[name];
-  render();
+  // 有文件区时：示例落成一张新图，别覆盖当前正在改的那张
+  if (typeof fsImportSingle === 'function') {
+    fsImportSingle(SAMPLES[name], name + '.uml');
+    if (typeof setStatus === 'function') setStatus(`已载入示例「${name}」，存为一张新图`, 'ok');
+  } else {
+    editor.value = SAMPLES[name];
+    render();
+  }
   sampleSelect.value = '';
 });

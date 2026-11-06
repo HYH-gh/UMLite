@@ -1,4 +1,5 @@
 /* ---------------- 启动 ---------------- */
 
-editor.value = SAMPLES['类图 · 电商系统'];
+// 文件管理接管首屏：从本地存档（或首次生成的示例树）里取出当前那张图
+fsInit();
 requestAnimationFrame(() => render());

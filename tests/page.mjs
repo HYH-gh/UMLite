@@ -32,6 +32,7 @@ const PAGE_SCRIPTS = [
   'js/export.js',
   'js/ui.js',
   'js/samples.js',
+  'js/files.js',
   'js/history.js',
   'js/changelog.js',
   'js/notice.js',
@@ -48,7 +49,12 @@ function makeFakeDom() {
     add: (c) => { node._cls.add(c); },
     remove: (c) => { node._cls.delete(c); },
     contains: (c) => node._cls.has(c),
-    toggle: (c) => { node._cls.has(c) ? node._cls.delete(c) : node._cls.add(c); }
+    // 与真实 classList.toggle 一致：支持第二个 force 参数（产品代码用到了 toggle(cls, force)）
+    toggle: (c, force) => {
+      const want = force === undefined ? !node._cls.has(c) : !!force;
+      if (want) node._cls.add(c); else node._cls.delete(c);
+      return want;
+    }
   });
 
   function FakeNode(tag) {
@@ -508,9 +514,180 @@ export function runPageSmoke() {
     call('closeNotice');
   });
 
+  /* ---------------- 文件管理 ---------------- */
+
+  const tree = () => dom.document.getElementById('file-tree');
+  const rows = () => (tree().children || []).map(rowInfo);
+  const rowOf = (id) => rows().find(r => r.id === id) || null;
+
+  run('文件树：首屏把当前图列出来，名字与图标都来自代码', () => {
+    const list = rows();
+    if (!list.length) throw new Error('文件树是空的');
+    const cur = g('fsCurrent');
+    const row = rowOf(cur);
+    if (!row) throw new Error('当前图不在树里');
+    if (row.name !== '电商系统类图') throw new Error('名字没有取自 @diagram 标题：' + row.name);
+    if (row.icon !== '#ic-uml-class') throw new Error('类图图标不对：' + row.icon);
+    if (row.kind !== 'class') throw new Error('右侧类型标签不对：' + row.kind);
+    const demo = list.find(r => r.name === '示例');
+    if (!demo) throw new Error('首次使用应带一个「示例」目录');
+  });
+
+  run('文件树：10 种图各自有图标，标题逐条解析', () => {
+    const want = {
+      class: 'ic-uml-class', usecase: 'ic-uml-usecase', activity: 'ic-uml-activity',
+      sequence: 'ic-uml-sequence', er: 'ic-uml-er', state: 'ic-uml-state',
+      component: 'ic-uml-component', deployment: 'ic-uml-deployment',
+      object: 'ic-uml-object', package: 'ic-uml-package'
+    };
+    const samples = g('SAMPLES');
+    const noTitle = [];
+    for (const key of Object.keys(samples)) {
+      const meta = call('fsMeta', samples[key]);
+      if (!meta.type) throw new Error(`示例「${key}」没解析出图类型`);
+      if (!meta.title) noTitle.push(key);
+      const icon = call('fsIconId', { kind: 'file', src: samples[key] });
+      if (icon !== want[meta.type]) throw new Error(`${key} 的图标应为 ${want[meta.type]}，实际 ${icon}`);
+    }
+    if (noTitle.length) throw new Error('这些示例的标题没解析出来：' + noTitle.join('、'));
+  });
+
+  run('文件树：新建图 / 新建目录落在当前目录下', () => {
+    const folderNode = call('fsAddNode', 'folder', null);
+    if (!folderNode || folderNode.kind !== 'folder') throw new Error('没有建成目录');
+    if (g('fsSelId') !== folderNode.id) throw new Error('新建后应选中它');
+    const fileNode = call('fsAddNode', 'file', folderNode.id);
+    if (call('fsParent', fileNode.id).id !== folderNode.id) throw new Error('新图没有进选中目录');
+    if (call('fsDisplayName', fileNode) !== '新建图') throw new Error('空代码的图应叫「新建图」');
+    if (call('fsIconId', fileNode) !== 'ic-newfile') throw new Error('空代码的图应用空白文件图标');
+    if (rowOf(fileNode.id).name !== '新建图') throw new Error('树里没有显示「新建图」');
+  });
+
+  run('文件树：目录可重命名，改名后树同步', () => {
+    const folder = call('fsAddNode', 'folder', null);
+    call('fsRenameFolder', folder.id, '设计稿');
+    if (folder.name !== '设计稿') throw new Error('重命名没生效');
+    if (rowOf(folder.id).name !== '设计稿') throw new Error('树里名字没更新');
+    call('fsRenameFolder', folder.id, '   ');
+    if (folder.name !== '设计稿') throw new Error('空名字应保持原名');
+  });
+
+  run('文件树：拖动改变层级，目录不能塞进自己的子孙', () => {
+    const outer = call('fsAddNode', 'folder', null);
+    const inner = call('fsAddNode', 'folder', outer.id);
+    const file = call('fsAddNode', 'file', null);
+    if (!call('fsMoveNode', file.id, inner.id, 'into')) throw new Error('文件没能拖进目录');
+    if (call('fsParent', file.id).id !== inner.id) throw new Error('拖动后父目录不对');
+    if (call('fsMoveNode', outer.id, inner.id, 'into')) throw new Error('目录被拖进了自己的子目录');
+    if (call('fsMoveNode', outer.id, file.id, 'before')) throw new Error('目标不是目录时应作为同级插入 —— 该调用应成功');
+  });
+
+  run('文件树：图的代码改动会改掉树里的名字', () => {
+    const f = call('fsAddNode', 'file', null);
+    editor().value = '@diagram sequence "下单时序"\nactor 用户\n用户 -> 系统 : 下单';
+    call('render', { force: true });
+    if (f.src.indexOf('下单时序') < 0) throw new Error('编辑器内容没有写回文件');
+    if (call('fsDisplayName', f) !== '下单时序') throw new Error('名字没跟着代码走');
+    if (call('fsIconId', f) !== 'ic-uml-sequence') throw new Error('换类型后图标没跟着变');
+  });
+
+  run('文件树：切换文件会先保存上一张图的内容', () => {
+    const a = call('fsAddNode', 'file', null);
+    editor().value = '@diagram class "第一张"\nclass A';
+    call('render', { force: true });
+    const b = call('fsAddNode', 'file', null);
+    editor().value = '@diagram class "第二张"\nclass B';
+    call('render', { force: true });
+    call('fsSelect', a.id);
+    if (!/第一张/.test(editor().value)) throw new Error('切回来内容丢了');
+    if (!/第一张/.test(a.src)) throw new Error('切走时没有把内容存回第一个文件');
+  });
+
+  run('项目导出 / 导入：JSON 往返后结构一致', () => {
+    const before = call('fsCountFiles', g('fsRoot'));
+    const data = call('fsExportProject');
+    if (data.type !== 'umlite-project' || !data.root.children.length) throw new Error('导出的项目结构不对');
+    const json = JSON.stringify(data);
+    call('fsImportProject', json, 'overwrite');
+    if (call('fsCountFiles', g('fsRoot')) !== before) throw new Error('覆盖导入后文件数不一致');
+    // 再插入一份：文件翻倍，且多出一个同名子目录
+    const res = call('fsImportProject', json, 'insert');
+    if (res.count !== before) throw new Error('插入的图数量不对');
+    if (call('fsCountFiles', g('fsRoot')) !== before * 2) throw new Error('插入后总数应为两倍');
+    if (!/导入|根目录|\(2\)/.test(res.name)) throw new Error('插入的目录名没做去重：' + res.name);
+  });
+
+  run('单图导入：落到当前选中的目录', () => {
+    const folder = call('fsAddNode', 'folder', null);
+    call('fsRenameFolder', folder.id, '导入目标');
+    call('fsSelect', folder.id);   // 目录不能当作图打开，选中状态应保持不变
+    vm.runInContext('fsSelId = ' + JSON.stringify(folder.id) + ';', ctx);
+    const node = call('fsImportSingle', '@diagram er "导入的 E-R 图"\nentity A', 'demo.uml');
+    if (call('fsParent', node.id).id !== folder.id) throw new Error('单图没有落到选中目录');
+    if (call('fsDisplayName', node) !== '导入的 E-R 图') throw new Error('导入的图名字不对');
+  });
+
+  run('文件区：可以隐藏，恢复后与原来一致', () => {
+    const pane = dom.document.getElementById('files-pane');
+    call('fsSetPaneVisible', false);
+    if (!pane.classList.contains('hidden')) throw new Error('隐藏没生效');
+    if (dom.document.getElementById('btn-files').classList.contains('on')) throw new Error('按钮状态没同步');
+    call('fsSetPaneVisible', true);
+    if (pane.classList.contains('hidden')) throw new Error('显示没生效');
+  });
+
+  run('文件树：全部内容都存进了 localStorage', () => {
+    const raw = JSON.parse(sandbox.localStorage.getItem('umlite.fs.v1') || 'null');
+    if (!raw || !raw.root) throw new Error('没有存档');
+    if (typeof raw.current !== 'string') throw new Error('没有记住当前图');
+    const count = call('fsCountFiles', g('fsRoot'));
+    const countInSaved = (function walk(n) {
+      return n.kind === 'folder' ? (n.children || []).reduce((s, c) => s + walk(c), 0) : 1;
+    })(raw.root);
+    if (countInSaved !== count) throw new Error(`存档里的图数量 ${countInSaved} ≠ 内存里的 ${count}`);
+  });
+
+  run('文件树：删除当前图后自动切到另一张', () => {
+    const victim = call('fsAddNode', 'file', null);
+    editor().value = '@diagram class "待删除"\nclass X';
+    call('render', { force: true });
+    const total = call('fsCountFiles', g('fsRoot'));
+    if (!call('fsDeleteNode', victim.id)) throw new Error('删除返回失败');
+    if (call('fsCountFiles', g('fsRoot')) !== total - 1) throw new Error('删除后图的数量没减少');
+    if (g('fsCurrent') === victim.id) throw new Error('当前图还指着已删掉的节点');
+    if (!call('fsNode', g('fsCurrent'))) throw new Error('没有切到另一个可用的图');
+    if (rowOf(victim.id)) throw new Error('树里还留着已删除的行');
+  });
+
+  run('载入示例：新开一张图，不覆盖正在编辑的那张', () => {
+    const before = g('fsCurrent');
+    const beforeSrc = call('fsNode', before).src;
+    const sel = dom.document.getElementById('samples');
+    sel.value = '用例图 · 图书馆';
+    sel.fire('change');
+    if (g('fsCurrent') === before) throw new Error('示例应该开成新文件');
+    if (call('fsNode', before).src !== beforeSrc) throw new Error('正在编辑的图被示例覆盖了');
+    if (!/图书馆/.test(editor().value)) throw new Error('示例内容没进编辑器');
+  });
+
   return results;
 }
 
+/* 从渲染出的 DOM 行里读出：id / class / 名字 / 图标 / 类型标签 */
+function rowInfo(row) {
+  const kids = row.children || [];
+  const byClass = (name) => kids.find(k => k.attrs && String(k.attrs['class'] || '').split(/\s+/).indexOf(name) >= 0);
+  const nameEl = byClass('tree-name');
+  const iconEl = byClass('tree-ic');
+  const kindEl = byClass('tree-kind');
+  return {
+    id: row.attrs && row.attrs['data-id'],
+    cls: (row.attrs && row.attrs['class']) || '',
+    name: nameEl ? nameEl.textContent : '',
+    icon: iconEl && iconEl.children[0] ? iconEl.children[0].attrs.href : '',
+    kind: kindEl ? kindEl.textContent : ''
+  };
+}
 /* 允许单独执行：node tests/page.mjs */
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {

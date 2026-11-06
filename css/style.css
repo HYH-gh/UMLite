@@ -152,6 +152,96 @@
   .sel-ic{display:inline-flex;align-items:center;gap:4px;color:var(--muted);}
   .sel-ic .ic{margin-right:0;}
 
+  /* ---------------- 文件区（虚拟目录树） ---------------- */
+  .pane-head .pane-toggle{
+    display:inline-flex;align-items:center;gap:3px;padding:2px 8px;font-size:11.5px;
+    background:#fff;color:var(--muted);border-radius:6px;
+  }
+  .pane-toggle .ic{margin-right:0;}
+  .pane-toggle.on{background:#eef2ff;border-color:#c7d2fe;color:var(--accent);}
+  #files-pane{
+    flex:0 0 auto;height:216px;min-height:78px;display:flex;flex-direction:column;
+    background:#fbfcff;border-top:1px solid var(--border);
+  }
+  #files-pane.hidden{display:none;}
+  .files-head{
+    display:flex;align-items:center;gap:6px;padding:4px 8px;flex:0 0 auto;
+    border-bottom:1px solid var(--border);background:#f5f8fd;
+  }
+  .files-title{font-size:12px;font-weight:700;color:var(--muted);}
+  .files-path{
+    flex:1;min-width:0;font-size:11px;color:#94a3b8;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;font-family:"SF Mono",Menlo,Consolas,monospace;
+  }
+  .files-tools{display:flex;gap:4px;flex:none;}
+  .fs-btn{
+    display:inline-flex;align-items:center;gap:3px;padding:2px 7px;font-size:11px;
+    border-radius:6px;background:#fff;color:var(--muted);
+  }
+  .fs-btn:hover{color:var(--accent);border-color:var(--accent);}
+  .fs-btn .ic{margin-right:0;}
+  .file-tree{flex:1;min-height:0;overflow:auto;padding:4px 4px 6px;overscroll-behavior:contain;}
+  .tree-empty{padding:14px 10px;font-size:12px;color:#9aa6bc;text-align:center;}
+  .tree-row{
+    display:flex;align-items:center;gap:5px;height:26px;padding:0 6px;border-radius:6px;
+    cursor:pointer;white-space:nowrap;font-size:12.5px;color:var(--text);
+    border:1px solid transparent;user-select:none;
+  }
+  .tree-row:hover{background:#eef2f9;}
+  .tree-row.sel{background:#e8eeff;border-color:#c7d2fe;}
+  .tree-row.dragging{opacity:.4;}
+  .tree-row.drop-into{background:#dbeafe;border-color:var(--accent);}
+  .tree-row.drop-before{box-shadow:inset 0 2px 0 var(--accent);}
+  .tree-caret{width:12px;height:12px;flex:none;color:#94a3b8;transition:transform .12s;}
+  .tree-caret svg{width:12px;height:12px;display:block;}
+  .tree-row.open > .tree-caret{transform:rotate(90deg);}
+  .tree-caret.leaf{visibility:hidden;}
+  .tree-ic{width:14px;height:14px;flex:none;color:#64748b;}
+  .tree-row.sel > .tree-ic,.tree-row.sel > .tree-name{color:var(--accent);}
+  .tree-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;}
+  .tree-name-input{
+    flex:1;min-width:0;font:inherit;font-size:12.5px;padding:0 4px;height:20px;
+    border:1px solid var(--accent);border-radius:4px;background:#fff;color:var(--text);
+    outline:none;box-shadow:0 0 0 2px rgba(79,110,247,.16);
+  }
+  .tree-kind{font-size:10px;color:#a3aec2;font-family:"SF Mono",Menlo,Consolas,monospace;flex:none;}
+  .tree-row.sel > .tree-kind{color:#818cf8;}
+  .files-hint{
+    flex:0 0 auto;padding:2px 10px 4px;font-size:10.5px;color:#a9b3c6;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .files-divider{
+    flex:0 0 auto;height:5px;cursor:row-resize;background:var(--border);
+    opacity:.5;transition:opacity .15s, background .15s;
+  }
+  .files-divider:hover,.files-divider.active{background:var(--accent);opacity:1;}
+  #files-pane.hidden + .files-divider{display:none;}
+
+  /* 文件树右键 / 长按菜单 */
+  .tree-menu{
+    position:fixed;z-index:150;min-width:132px;padding:4px;background:var(--panel);
+    border:1px solid var(--border);border-radius:8px;box-shadow:0 10px 26px rgba(15,23,42,.18);
+  }
+  .tree-menu.hidden{display:none;}
+  .tree-menu button{
+    display:block;width:100%;text-align:left;padding:6px 10px;border:0;border-radius:6px;
+    background:transparent;font-size:12.5px;color:var(--text);
+  }
+  .tree-menu button:hover{background:#f1f5f9;color:var(--accent);}
+
+  /* 通用选择弹窗（导入项目时询问覆盖 / 插入） */
+  .menu-sep{height:1px;margin:4px 6px;background:var(--border);}
+  .ask{width:min(440px,92vw);}
+  .ask-msg{margin:6px 0 12px;line-height:1.7;}
+  .ask-meta{
+    font-size:11.5px;color:var(--muted);background:#f5f8fd;border:1px solid var(--border);
+    border-radius:8px;padding:8px 10px;font-family:"SF Mono",Menlo,Consolas,monospace;
+  }
+  .ask-actions{display:flex;gap:8px;margin-left:auto;}
+  .ask-btn{padding:7px 14px;font-size:12.5px;}
+  .ask-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;}
+  .ask-btn.primary:hover{background:#3f5ce8;border-color:#3f5ce8;color:#fff;}
+
   /* ---- 更新公告弹窗 ---- */
   .notice-mask{
     position:fixed;inset:0;z-index:200;display:none;align-items:center;justify-content:center;
