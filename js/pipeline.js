@@ -43,9 +43,10 @@ function structuralSignature(model) {
 }
 
 /* ---------------- 按图类型分发布局 ----------------
- * 类图/对象图/包图/组件图/部署图/ER：力导向（类图、部署图再加正交化）
+ * 类图/对象图/组件图/部署图：分层布局（泛化树做骨架，散点力导向聚簇），
+ *   连线少交叉、尽量横平竖直；ER / 状态图等关联致密的仍走力导向。
  * 活动图/状态图：分层 + Barycenter 层内排序
- * 用例图含系统边界：只对框内元素力导向，框外由 normalizeToOrigin 摆放
+ * 用例图含系统边界：框内元素按关联分层排布，框外由 normalizeToOrigin 摆放
  * 时序图：横向等距排参与者 + 纵向行号布局
  */
 function layoutModel(model) {
@@ -63,16 +64,34 @@ function layoutModel(model) {
     const insideNodes = model.nodes.filter(n => n.insideBoundary);
     if (insideNodes.length) {
       const subModel = Object.assign({}, model, { nodes: insideNodes });
-      layoutForce(subModel);
+      // 框外的 actor 传进去参与 Barycenter：actor 纵向位置影响用例的层内排序
+      subModel.__outsideNodes = model.nodes.filter(n => !n.insideBoundary && (n.kind === 'actor' || n.kind === 'businessactor'));
+      layoutUsecaseInner(subModel);
       // 二次更强的消除重叠，保证框内元素互不遮挡
       resolveOverlaps(subModel.nodes, 64, 52);
     }
+  } else if ((model.type === 'class' || model.type === 'object' || model.type === 'component' || model.type === 'deployment')
+             && model.edges.length >= 6) {
+    layoutLayered(model);
   } else {
     layoutForce(model);
   }
   normalizeToOrigin(model);
   if (model.type === 'activity') layoutActivityContainers(model);
+  // 最后统一给斜线补正交折点（bends 随最终坐标生成，normalizeToOrigin 的平移不会再动它们）
+  // 用例图用「横-竖-横」折法（actor 在左、用例在右，横向先走更自然），其余用「竖-横-竖」
+  // 可通过「折线」按钮全局开关（ORTHO_ENABLED），关掉时保留直线/斜线
+  if (ORTHO_ENABLED && model.type !== 'sequence' && model.type !== 'er') {
+    orthogonalEdgeRouting(model, { style: model.type === 'usecase' ? 'hvh' : 'vhv' });
+  }
 }
+
+/* ---------------- 连线折线开关 ----------------
+ * 默认开：分层/树形布局后斜线自动补直角折点。
+ * 有些图（致密关联、手调布局）斜线更直观，预览工具栏可一键切换。 */
+let ORTHO_ENABLED = true;
+function setOrthoEnabled(v) { ORTHO_ENABLED = !!v; return ORTHO_ENABLED; }
+function isOrthoEnabled() { return ORTHO_ENABLED; }
 
 /* ---------------- 主入口 ---------------- */
 
@@ -84,7 +103,7 @@ function buildModel(src, opts) {
   opts = opts || {};
   const fresh = parseDSL(src);
   const sig = structuralSignature(fresh);
-  const layoutSig = JSON.stringify(fresh.layout || []);
+  const layoutSig = JSON.stringify(fresh.layout || []) + '|' + (ORTHO_ENABLED ? 'O' : 'L');
   const prev = opts.previous;
   if (!opts.force && prev && prev.sig === sig && prev.layoutSig === layoutSig) {
     return { model: prev.model, sig, layoutSig, reused: true };

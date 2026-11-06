@@ -49,13 +49,15 @@ const ARROW_NORMALIZE = {
 
 function findArrow(s) {
   let best = null;
-  for (const a of ARROWS) {
-    let idx = s.indexOf(a);
-    while (idx !== -1) {
-      if (!best || idx < best.idx || (idx === best.idx && a.length > best.arrow.length)) {
-        best = { idx, arrow: a };
+  // 跳过引号内的内容（如多重性 "0..*" 里的 .. 不是箭头）
+  let inQuote = false;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === '"') inQuote = !inQuote;
+    if (inQuote) continue;
+    for (const a of ARROWS) {
+      if (s.startsWith(a, i) && (!best || i < best.idx || (i === best.idx && a.length > best.arrow.length))) {
+        best = { idx: i, arrow: a };
       }
-      idx = s.indexOf(a, idx + 1);
     }
   }
   return best;

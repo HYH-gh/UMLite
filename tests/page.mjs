@@ -471,6 +471,30 @@ export function runPageSmoke() {
     if (g('currentModel').edges[0].bends) throw new Error('撤销后折点应消失');
   });
 
+  run('折线开关：切换按钮影响重排与 bend 生成', () => {
+    // 斜放的三个 class：连线明显是斜线，折线开启时应有 bends
+    editor().value = '@diagram class\nclass A\nclass B\nclass C\nA --> B\nB --> C\nA --> C';
+    call('render', { force: true });
+    // 默认开：至少一条边被补了折点（渲染时正交化）
+    call('setOrthoEnabled', false);
+    call('render', { force: true });
+    if (g('currentModel').edges.some(e => e.bends && e.bends.length)) {
+      throw new Error('折线关闭后不应残留自动折点');
+    }
+    call('setOrthoEnabled', true);
+    call('render', { force: true });
+    if (!g('currentModel').edges.some(e => e.bends && e.bends.length)) {
+      throw new Error('折线开启后应给斜线补折点');
+    }
+    // 按钮文字随状态切换（假 DOM 用 fire 触发事件）
+    const btn = dom.document.getElementById('btn-ortho');
+    if (!btn) throw new Error('缺少 btn-ortho 按钮');
+    btn.fire('click', {});
+    if (!/折线：关/.test(btn.textContent)) throw new Error('点击后按钮文字应变为「关」：' + btn.textContent);
+    btn.fire('click', {});
+    if (!/折线：开/.test(btn.textContent)) throw new Error('再次点击应恢复「开」：' + btn.textContent);
+  });
+
   run('窄屏标签切换：代码 / 预览 互斥显示', () => {
     call('setMobilePane', 'preview');
     if (dom.document.body.dataset.pane !== 'preview') throw new Error('未切到预览');
@@ -529,8 +553,11 @@ export function runPageSmoke() {
     if (row.name !== '电商系统类图') throw new Error('名字没有取自 @diagram 标题：' + row.name);
     if (row.icon !== '#ic-uml-class') throw new Error('类图图标不对：' + row.icon);
     if (row.kind !== 'class') throw new Error('右侧类型标签不对：' + row.kind);
-    const demo = list.find(r => r.name === '示例');
-    if (!demo) throw new Error('首次使用应带一个「示例」目录');
+    const folder = list.find(r => r.name === '新建目录');
+    if (!folder) throw new Error('首次使用应带一个「新建目录」');
+    if (!/^\/新建目录\//.test(call('fsPathOf', cur))) {
+      throw new Error('默认的类图应该在那目录里：' + call('fsPathOf', cur));
+    }
   });
 
   run('文件树：10 种图各自有图标，标题逐条解析', () => {
@@ -668,6 +695,28 @@ export function runPageSmoke() {
     if (g('fsCurrent') === before) throw new Error('示例应该开成新文件');
     if (call('fsNode', before).src !== beforeSrc) throw new Error('正在编辑的图被示例覆盖了');
     if (!/图书馆/.test(editor().value)) throw new Error('示例内容没进编辑器');
+  });
+
+  run('删除：弹的是页面自带的确认框，不是浏览器原生 alert', () => {
+    const victim = call('fsAddNode', 'file', null);
+    const total = call('fsCountFiles', g('fsRoot'));
+    const mask = dom.document.getElementById('ask-mask');
+    mask.classList.remove('is-open');
+    call('fsDeleteWithConfirm', victim.id);
+    if (!mask.classList.contains('is-open')) throw new Error('没有弹出确认框');
+    const title = dom.document.getElementById('ask-title').textContent;
+    if (title !== '删除图') throw new Error('标题不对：' + title);
+    const msg = dom.document.getElementById('ask-msg').textContent;
+    if (msg.indexOf('新建图') < 0) throw new Error('提示里没有图名：' + msg);
+    const extra = dom.document.getElementById('ask-extra').textContent;
+    if (extra.indexOf('无法恢复') < 0) throw new Error('没有说明后果：' + extra);
+    const btns = dom.document.getElementById('ask-actions').children;
+    if (btns.length !== 1) throw new Error('确认按钮数量不对：' + btns.length);
+    if (!/danger/.test(btns[0].attrs['class'] || '')) throw new Error('删除按钮没有危险色样式');
+    if (call('fsCountFiles', g('fsRoot')) !== total) throw new Error('还没确认就把图删了');
+    // 收尾：等同于点了「取消」
+    vm.runInContext('typeof askClose === "function" && askClose(null);', ctx);
+    mask.classList.remove('is-open');
   });
 
   return results;

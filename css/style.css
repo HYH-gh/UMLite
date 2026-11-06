@@ -229,10 +229,10 @@
   }
   .tree-menu button:hover{background:#f1f5f9;color:var(--accent);}
 
-  /* 通用选择弹窗（导入项目时询问覆盖 / 插入） */
+  /* 通用选择弹窗（导入项目时询问覆盖 / 插入，删除时确认） */
   .menu-sep{height:1px;margin:4px 6px;background:var(--border);}
   .ask{width:min(440px,92vw);}
-  .ask-msg{margin:6px 0 12px;line-height:1.7;}
+  .ask-msg{margin:6px 0 12px;line-height:1.7;font-weight:600;color:var(--text);}
   .ask-meta{
     font-size:11.5px;color:var(--muted);background:#f5f8fd;border:1px solid var(--border);
     border-radius:8px;padding:8px 10px;font-family:"SF Mono",Menlo,Consolas,monospace;
@@ -241,6 +241,9 @@
   .ask-btn{padding:7px 14px;font-size:12.5px;}
   .ask-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;}
   .ask-btn.primary:hover{background:#3f5ce8;border-color:#3f5ce8;color:#fff;}
+  .ask-btn.danger{background:var(--err);border-color:var(--err);color:#fff;font-weight:600;}
+  .ask-btn.danger:hover{background:#c02626;border-color:#c02626;color:#fff;}
+  .ask-btn.danger:focus-visible{outline:2px solid rgba(220,38,38,.35);outline-offset:2px;}
 
   /* ---- 更新公告弹窗 ---- */
   .notice-mask{
@@ -302,12 +305,15 @@
   .mobile-tabs{display:none;}
 
   /* ===================== 平板 / 窄桌面 ===================== */
+  /* 语法提示和右侧的快捷键标签都太长，窄一点就折行，够宽才显示 */
+  @media (max-width:1200px){
+    .pane-head .hint,.pane-head .badge{display:none;}
+  }
   @media (max-width:1024px){
     header{gap:6px;padding:6px 10px;}
     header button,header select{font-size:12px;padding:5px 9px;}
     .logo small{display:none;}
     .pane-head{padding:5px 10px;font-size:11px;flex-wrap:wrap;row-gap:4px;}
-    .pane-head .hint,.pane-head .badge{display:none;}
     .pane-head button{padding:4px 9px !important;font-size:11.5px !important;}
   }
 

@@ -133,6 +133,368 @@ function initForcePositions(nodes, edges, W, H) {
   });
 }
 
+/* -------- 分层布局（Sugiyama 简化版）：类图 / 对象图 / 组件图 / 部署图 --------
+ * 目标：1) 元素不重叠；2) 连线少交叉；3) 连线横平竖直。
+ * 思路：
+ *  - 泛化边（--|>）天然是「父在上、子在下」的树，按它分层最符合 UML 阅读习惯；
+ *  - 没有泛化关系的节点（关联/依赖为主的 03 这类图）退化为「所有边均匀分层」；
+ *  - 层内用 Barycenter 减少交叉；
+ *  - 每层一行、层内依次排开，坐标落在行列网格上 —— 中心连线自然横平竖直；
+ *  - 力导向仅作为泛化树之外散点的补充（保持分量聚簇），不再全局乱撒。 */
+function layoutLayered(model) {
+  const { nodes, edges } = model;
+  const n = nodes.length;
+  if (!n) return;
+
+  const byId = new Map(nodes.map(nd => [nd.id, nd]));
+  const isGen = e => e.kind === 'generalization' || e.kind === 'realization';
+  // 泛化边：child --|> parent
+  const genEdges = edges.filter(e => byId.has(e.from) && byId.has(e.to) && e.from !== e.to && isGen(e));
+  const otherEdges = edges.filter(e => byId.has(e.from) && byId.has(e.to) && e.from !== e.to && !isGen(e));
+
+  /* 1. 分层：优先用泛化树，泛化边太少（< 2）则用全部边做 BFS 分层 */
+  const depth = new Map();
+  const useGen = genEdges.length >= 2;
+  const layerEdges = useGen ? genEdges : otherEdges;
+  if (layerEdges.length) {
+    // 出边 = 走向更深层。泛化取 child->parent 方向为「向根」，反转成根在上
+    const adj = new Map(nodes.map(nd => [nd.id, []]));
+    for (const e of layerEdges) {
+      const a = useGen ? e.to : e.from;   // 泛化：父(目标)在浅层
+      const b = useGen ? e.from : e.to;   // 普通边：源在浅层
+      adj.get(a).push(b);
+    }
+    const indeg = new Map(nodes.map(nd => [nd.id, 0]));
+    for (const e of layerEdges) indeg.set(useGen ? e.from : e.to, (indeg.get(useGen ? e.from : e.to) || 0) + 1);
+    // 从入度 0（根）开始 BFS；有环/不可达的后面兜底
+    const q = [];
+    for (const nd of nodes) {
+      if ((indeg.get(nd.id) || 0) === 0 && adj.get(nd.id).length) { depth.set(nd.id, 0); q.push(nd.id); }
+    }
+    // 孤立但有其它边的节点也会由下一轮处理
+    while (q.length) {
+      const cur = q.shift();
+      const d = depth.get(cur) || 0;
+      for (const nx of adj.get(cur)) {
+        // 只有真的被推深一层才重排/继续，避免「更新了深度却没入队」导致子树丢失
+        if (!depth.has(nx) || depth.get(nx) < d + 1) {
+          depth.set(nx, d + 1);
+          q.push(nx);
+        }
+      }
+    }
+  }
+  // 没进任何层的节点：暂时 0 层，后面按连通分量补
+  const layered = nodes.filter(nd => depth.has(nd.id));
+  const loose = nodes.filter(nd => !depth.has(nd.id));
+
+  /* 2. 组层 + 层内排序 */
+  let maxD = 0;
+  for (const d of depth.values()) maxD = Math.max(maxD, d);
+  const layers = [];
+  for (let i = 0; i <= maxD; i++) layers.push([]);
+  for (const nd of layered) layers[depth.get(nd.id)].push(nd);
+  // 层内排序（Barycenter，考虑所有边：层间边+层内边都参与，减少交叉）
+  if (layers.length > 1) {
+    const posOf = new Map();
+    layers.forEach((ly, di) => ly.forEach((nd, i) => posOf.set(nd.id, i)));
+    for (let pass = 0; pass < 8; pass++) {
+      for (let di = 0; di < layers.length; di++) {
+        const ly = layers[di];
+        if (ly.length < 2) continue;
+        const ev = ly.map((nd, i) => {
+          let sum = 0, cnt = 0;
+          for (const e of edges) {
+            if (e.from === nd.id && posOf.has(e.to)) { sum += posOf.get(e.to); cnt++; }
+            if (e.to === nd.id && posOf.has(e.from)) { sum += posOf.get(e.from); cnt++; }
+          }
+          return { nd, bc: cnt ? sum / cnt : i, old: i };
+        });
+        ev.sort((x, y) => x.bc - y.bc || x.old - y.old);
+        layers[di] = ev.map(x => x.nd);
+        layers[di].forEach((nd, i) => posOf.set(nd.id, i));
+      }
+    }
+  }
+
+  /* 3. 摆坐标：
+   *  - 泛化树：tidy-tree —— 父节点居中在自己子树上方，兄弟依次排开。
+   *    泛化连线（父正下子）几乎竖直；不同子树互不侵入。
+   *  - 普通边分层（03 这种）：每层一行、行内依次排开 + 行居中。 */
+  const COL_GAP = 46, ROW_GAP = 60;
+  const genParent = new Map();   // child -> parent（一个子类只继承一个父类，多继承取第一个）
+  if (useGen) for (const e of genEdges) if (!genParent.has(e.from)) genParent.set(e.from, e.to);
+  const genChildren = new Map(); // parent -> [children...]
+  for (const [c, p] of genParent) {
+    if (!genChildren.has(p)) genChildren.set(p, []);
+    genChildren.get(p).push(c);
+  }
+
+  if (useGen) {
+    const MAX_ROW_W = 1050;   // 一行子节点的最大宽度，超了就折行（避免整棵树摊得过宽）
+    // 树根：在 layered 里但没有 parent 的
+    const roots = layered.filter(nd => !genParent.has(nd.id));
+    // 每棵子树的宽度（含间距），自底向上；同一父的子节点列表先按 MAX_ROW_W 折行分块
+    const SUB_GAP = 30;
+    const chunkedKids = new Map();   // parent id -> [ [kids...], [kids...] ]  每块一行
+    for (const [pid, kidsRaw] of genChildren) {
+      const kids = kidsRaw.filter(c => byId.has(c));
+      if (!kids.length) { chunkedKids.set(pid, []); continue; }
+      const chunks = [];
+      let cur = [], curW = 0;
+      for (const c of kids) {
+        const w = byId.get(c).w;
+        if (cur.length && curW + SUB_GAP + w > MAX_ROW_W) { chunks.push(cur); cur = []; curW = 0; }
+        cur.push(c); curW += (cur.length > 1 ? SUB_GAP : 0) + w;
+      }
+      if (cur.length) chunks.push(cur);
+      chunkedKids.set(pid, chunks);
+    }
+    const subtreeW = new Map();
+    const calcW = (nd) => {
+      const chunks = chunkedKids.get(nd.id) || [];
+      if (!chunks.length) { subtreeW.set(nd.id, nd.w); return nd.w; }
+      // 宽度 = 最宽块
+      let w = 0;
+      for (const ch of chunks) {
+        const cw = ch.reduce((s, c) => s + calcW(byId.get(c)), 0) + (ch.length - 1) * SUB_GAP;
+        w = Math.max(w, cw);
+      }
+      const total = Math.max(nd.w, w);
+      subtreeW.set(nd.id, total);
+      return total;
+    };
+    // 子树的块高（块数 × 行高），place 时用
+    const blockRows = new Map();
+    const calcRows = (nd) => {
+      const chunks = chunkedKids.get(nd.id) || [];
+      let rows = 1;
+      for (const ch of chunks) for (const c of ch) rows = Math.max(rows, 1 + calcRows(byId.get(c)));
+      blockRows.set(nd.id, rows);
+      return rows;
+    };
+    for (const r of roots) { calcW(r); calcRows(r); }
+
+    // 行高：按层收集（不再全局唯一 —— 折行后各块用自己的层高）
+    const rowH = new Map();
+    for (const nd of layered) rowH.set(depth.get(nd.id), Math.max(rowH.get(depth.get(nd.id)) || 0, nd.h));
+
+    // 递归摆位：给出本子树左缘 x 与本层顶 y。返回子树底 y（供折行块下移用）
+    const place = (nd, leftX, topY) => {
+      const d = depth.get(nd.id);
+      const h = rowH.get(d) || nd.h;
+      nd.y = topY + h / 2;
+      const chunks = chunkedKids.get(nd.id) || [];
+      if (!chunks.length) {
+        nd.x = leftX + subtreeW.get(nd.id) / 2;
+        return topY + h;
+      }
+      // 折行块：每块一行，块与块之间纵向排（下一块顶 = 本块底 + ROW_GAP）
+      let rowTop = topY + h + ROW_GAP;
+      let bottom = rowTop;
+      let maxRowW = 0;
+      for (const ch of chunks) {
+        let cx = leftX;
+        let chunkBottom = rowTop;
+        for (const c of ch) {
+          const b = place(byId.get(c), cx, rowTop);
+          chunkBottom = Math.max(chunkBottom, b);
+          cx += subtreeW.get(c) + SUB_GAP;
+        }
+        maxRowW = Math.max(maxRowW, cx - SUB_GAP - leftX);
+        rowTop = chunkBottom + ROW_GAP;
+        bottom = rowTop;
+      }
+      // 父节点中心 = 最宽块的中点
+      const widest = chunks.reduce((best, ch) => {
+        const w = ch.reduce((s, c) => s + subtreeW.get(c), 0) + (ch.length - 1) * SUB_GAP;
+        return w > best.w ? { ch, w } : best;
+      }, { ch: chunks[0], w: -1 }).ch;
+      const first = byId.get(widest[0]), last = byId.get(widest[widest.length - 1]);
+      nd.x = (first.x + last.x) / 2;
+      return bottom;
+    };
+
+    // 根并排；每个根占其子树宽度
+    let rx = 0;
+    for (const r of roots) {
+      place(r, rx, 0);
+      rx += subtreeW.get(r.id) + SUB_GAP;
+    }
+
+    // 散点（没进泛化树的）：沿树底下再开一行区，按普通行排
+    if (loose.length) {
+      const treeBottom = Math.max(...layered.map(nd => nd.y + nd.h / 2), 0);
+      const looseTop = treeBottom + ROW_GAP * 1.4;
+      // 散点间有关联的用小型力导向聚簇，其余排成一行
+      const linked = loose.filter(nd => otherEdges.some(e => (e.from === nd.id || e.to === nd.id) && (loose.some(l => l.id === e.from) && loose.some(l => l.id === e.to))));
+      const solo = loose.filter(nd => !linked.includes(nd));
+      if (linked.length) {
+        const sub = { nodes: linked, edges: otherEdges.filter(e => linked.some(l => l.id === e.from) && linked.some(l => l.id === e.to)), type: model.type };
+        layoutForce(sub);
+        // 归一化散点子图坐标后平移到树下方
+        let mnX = Infinity, mnY = Infinity;
+        for (const nd of linked) { mnX = Math.min(mnX, nd.x - nd.w / 2); mnY = Math.min(mnY, nd.y - nd.h / 2); }
+        for (const nd of linked) { nd.x += -mnX; nd.y += looseTop - mnY; }
+      }
+      if (solo.length) {
+        // 排在聚簇区右侧；没有聚簇区就直接从树宽起
+        const clusterRight = linked.length ? Math.max(...linked.map(nd => nd.x + nd.w / 2)) : 0;
+        let x = Math.max(clusterRight + COL_GAP, 0);
+        const baseTop = linked.length
+          ? Math.max(...linked.map(nd => nd.y + nd.h / 2)) + ROW_GAP
+          : looseTop;
+        for (const nd of solo) {
+          nd.x = x + nd.w / 2;
+          nd.y = baseTop + nd.h / 2;
+          x += nd.w + COL_GAP;
+        }
+      }
+    }
+  } else {
+    // 普通分层：每层一行
+    let y = 0;
+    for (const ly of layers) {
+      if (!ly.length) { y += 60; continue; }
+      const h = Math.max(...ly.map(nd => nd.h));
+      let x = 0;
+      for (const nd of ly) { nd.x = x + nd.w / 2; nd.y = y + h / 2; x += nd.w + COL_GAP; }
+      y += h + ROW_GAP;
+    }
+    const widths = layers.map(ly => ly.reduce((s, nd) => s + nd.w, 0) + Math.max(0, ly.length - 1) * COL_GAP);
+    const maxW = Math.max(...widths, 1);
+    layers.forEach((ly, di) => {
+      const off = (maxW - widths[di]) / 2;
+      for (const nd of ly) nd.x += off;
+    });
+    // 全部都在层里，loose 为空；若真有就排右边
+    if (loose.length) {
+      const anchorX = maxW + 120;
+      let mnX = Infinity;
+      for (const nd of loose) mnX = Math.min(mnX, nd.x);
+      for (const nd of loose) nd.x += anchorX - mnX;
+    }
+  }
+}
+
+function buildIndexLinks(model) {
+  const idOf = new Map(model.nodes.map((nd, i) => [nd.id, i]));
+  return model.edges
+    .map(e => ({ a: idOf.get(e.from), b: idOf.get(e.to) }))
+    .filter(l => l.a !== undefined && l.b !== undefined && l.a !== l.b);
+}
+
+/* -------- 连线正交化：给斜线补「竖-横-竖」折点，让连线横平竖直 --------
+ * 分层/树形/泳道布局之后调用。只在「斜得明显」的边上加折点：
+ * 已横/已竖的连线保持直线；近距离的两点也不加（折线反而绕）。
+ * 渲染层 drawEdge 对带 bends 的边画 polyline，箭头贴最后一段方向。 */
+function orthogonalEdgeRouting(model, opts) {
+  opts = opts || {};
+  const byId = new Map(model.nodes.map(nd => [nd.id, nd]));
+  const MIN_SEG = (opts && opts.minSeg) || 26;   // 斜距超过这个值才折
+  const style = (opts && opts.style) || 'vhv';   // vhv=竖-横-竖；hvh=横-竖-横
+  for (const e of model.edges || []) {
+    if (e.connectToMidpoint) continue;             // 指向连线中点的便签引用不折
+    const a = byId.get(e.from), b = byId.get(e.to);
+    if (!a || !b || a === b) continue;
+    const dx = Math.abs(a.x - b.x), dy = Math.abs(a.y - b.y);
+    if (dx < 6 || dy < 6) continue;                // 已经横平或竖直
+    if (dx < MIN_SEG && dy < MIN_SEG) continue;    // 近距离，直线即可
+    if (style === 'hvh') {
+      const midX = (a.x + b.x) / 2;
+      e.bends = [{ x: midX, y: a.y }, { x: midX, y: b.y }];
+    } else {
+      const midY = (a.y + b.y) / 2;
+      e.bends = [{ x: a.x, y: midY }, { x: b.x, y: midY }];
+    }
+  }
+}
+
+/* -------- 用例图框内布局：按「角色→用例」「include/extend」做分层网格 --------
+ *  - 被角色直接指向的用例是第一层（离角色最近）；
+ *  - include/extend 的目标往里推一层；
+ *  - 层内 Barycenter 减少交叉，层间行排布，x 落列网格 —— 连线趋横平竖直。 */
+function layoutUsecaseInner(model) {
+  const { nodes, edges } = model;
+  if (!nodes.length) return;
+  const byId = new Map(nodes.map(nd => [nd.id, nd]));
+  const rel = edges.filter(e => byId.has(e.from) && byId.has(e.to) && e.from !== e.to);
+  if (!rel.length) { layoutForce(model); return; }
+
+  // 入度 0 的用例（只有角色指向它的）为第 0 层；include/extend 沿箭头方向加深
+  const depth = new Map();
+  const adj = new Map(nodes.map(nd => [nd.id, []]));
+  for (const e of rel) adj.get(e.from).push(e.to);
+  const q = [];
+  for (const nd of nodes) {
+    const hasIn = rel.some(e => e.to === nd.id);
+    if (!hasIn) { depth.set(nd.id, 0); q.push(nd.id); }
+  }
+  while (q.length) {
+    const cur = q.shift();
+    const d = depth.get(cur);
+    for (const nx of adj.get(cur)) {
+      if (!depth.has(nx)) { depth.set(nx, d + 1); q.push(nx); }
+    }
+  }
+  let maxD = 0;
+  for (const d of depth.values()) maxD = Math.max(maxD, d);
+  // 兜底：环上/不可达的给最大层
+  for (const nd of nodes) if (!depth.has(nd.id)) depth.set(nd.id, maxD = Math.max(maxD, (maxD + 1)));
+
+  const layers = [];
+  for (let i = 0; i <= maxD; i++) layers.push([]);
+  for (const nd of nodes) layers[depth.get(nd.id)].push(nd);
+
+  // 层内 Barycenter：邻居包括框外 actor（角色连线是交叉的主要来源），按 actor 的纵向位置参与排序
+  const outside = (model.__outsideNodes || []);
+  const lanePos = new Map();
+  outside.forEach((a, i) => lanePos.set(a.id, i));
+  const posOf = new Map();
+  layers.forEach((ly, di) => ly.forEach((nd, i) => posOf.set(nd.id, i)));
+  for (let pass = 0; pass < 8; pass++) {
+    for (let di = 0; di < layers.length; di++) {
+      const ly = layers[di];
+      if (ly.length < 2) continue;
+      const ev = ly.map((nd, i) => {
+        let sum = 0, cnt = 0;
+        for (const e of edges) {
+          if (e.from === nd.id) {
+            if (posOf.has(e.to)) { sum += posOf.get(e.to); cnt++; }
+            else if (lanePos.has(e.to)) { sum += lanePos.get(e.to) * 2; cnt++; }  // actor 在左列，位置权重放大
+          }
+          if (e.to === nd.id) {
+            if (posOf.has(e.from)) { sum += posOf.get(e.from); cnt++; }
+            else if (lanePos.has(e.from)) { sum += lanePos.get(e.from) * 2; cnt++; }
+          }
+        }
+        return { nd, bc: cnt ? sum / cnt : i, old: i };
+      });
+      ev.sort((x, y) => x.bc - y.bc || x.old - y.old);
+      layers[di] = ev.map(x => x.nd);
+      layers[di].forEach((nd, i) => posOf.set(nd.id, i));
+    }
+  }
+
+  // 摆放：椭圆较扁，层间距按最高椭圆
+  const COL_GAP = 36, ROW_GAP = 34;
+  let y = 0;
+  for (const ly of layers) {
+    if (!ly.length) { y += 40; continue; }
+    const rowH = Math.max(...ly.map(nd => nd.h));
+    let x = 0;
+    for (const nd of ly) { nd.x = x + nd.w / 2; nd.y = y + rowH / 2; x += nd.w + COL_GAP; }
+    y += rowH + ROW_GAP;
+  }
+  const widths = layers.map(ly => ly.reduce((s, nd) => s + nd.w, 0) + Math.max(0, ly.length - 1) * COL_GAP);
+  const maxW = Math.max(...widths, 1);
+  layers.forEach((ly, di) => {
+    const off = (maxW - widths[di]) / 2;
+    for (const nd of ly) nd.x += off;
+  });
+  resolveOverlaps(nodes, 40, 30);
+}
+
 function layoutForce(model) {
   const nodes = model.nodes;
   const n = nodes.length;
@@ -363,56 +725,138 @@ function layoutActivityContainers(model) {
     maxY = Math.max(maxY, n.y + n.h / 2);
   }
   if (minX === Infinity) { minX = 0; minY = 0; maxX = 220; maxY = 130; }
-  const PAD = 26;
-  const ax = minX - PAD, ay = minY - PAD, aw = maxX - minX + PAD * 2, ah = maxY - minY + PAD * 2;
 
-  if (activityEdge) {
-    activityEdge.x = ax; activityEdge.y = ay;
-    activityEdge.w = aw; activityEdge.h = ah;
-  }
+  // 泳道高度按内容加权：某条泳道里塞了几行节点，就给它几行的高度。
+  // 等分会让节点密的泳道溢出、节点稀的泳道大片留白，流程顺序也被打乱。
   if (swimlanes && swimlanes.length) {
-    const regionX = activityEdge ? activityEdge.x : ax;
-    const regionY = activityEdge ? activityEdge.y : ay;
-    const regionW = activityEdge ? activityEdge.w : aw;
-    const regionH = activityEdge ? activityEdge.h : ah;
-    // 水平泳道(:h)为横条，自上而下紧贴均分；垂直泳道(:v)为竖条，自左向右均分
+    const LANE_M = 26;               // 泳道内边距
     const hs = swimlanes.filter(s => s.dir === 'h');
-    if (hs.length) {
+    const vs = swimlanes.filter(s => s.dir === 'v');
+    // 混合方向（或全部未指定方向）：退回等分 —— 少见用法，保证可用即可
+    if (hs.length && vs.length) {
+      const PAD2 = 26;
+      const regionX = minX - PAD2, regionY = minY - PAD2;
+      const regionW = maxX - minX + PAD2 * 2, regionH = maxY - minY + PAD2 * 2;
       const hh = regionH / hs.length;
       hs.forEach((s, i) => { s.x = regionX; s.y = regionY + i * hh; s.w = regionW; s.h = hh; });
-    }
-    const vs = swimlanes.filter(s => s.dir === 'v');
-    if (vs.length) {
       const vw = regionW / vs.length;
       vs.forEach((s, i) => { s.x = regionX + i * vw; s.y = regionY; s.w = vw; s.h = regionH; });
+      constrainOwnedToLanes(swimlanes, nodes);
+    } else if (hs.length) {
+      // 每条泳道需要的行数（按该泳道节点的 y 值聚类，60px 内算同一行）
+      const rowsOf = hs.map(lane => {
+        const owned = nodes.filter(n => n.lane === lane.label);
+        if (!owned.length) return 1;
+        const ys = owned.map(n => n.y).sort((a, b) => a - b);
+        let rows = 1;
+        for (let i = 1; i < ys.length; i++) if (ys[i] - ys[i - 1] > 46) rows++;
+        return rows;
+      });
+      const rowH = 92;               // 一行活动（含决策菱形）的标称高度
+      const totalH = rowsOf.reduce((s, r) => s + r, 0) * rowH + (hs.length) * LANE_M * 2;
+      // 从现有内容区顶部开始重排：整块内容高度取 max(原有, 加权泳道高度)
+      const top = minY;
+      const regionH = Math.max(maxY - minY, totalH);
+      const unit = (regionH - hs.length * LANE_M * 2) / Math.max(rowsOf.reduce((s, r) => s + r, 0), 1);
+      // 横条泳道统一宽度：给「带内同层多节点」并排留出空间
+      const laneW = Math.max(maxX - minX, 940);
+      let cy = top;
+      hs.forEach((lane, i) => {
+        const h = rowsOf[i] * unit + LANE_M * 2;
+        lane.x = minX; lane.y = cy; lane.w = laneW; lane.h = h;
+        cy += h;
+      });
+      constrainOwnedToLanes(swimlanes, nodes);
+    } else if (vs.length) {
+      // 垂直泳道：宽度按各泳道最宽节点加权
+      const colsOf = vs.map(lane => {
+        const owned = nodes.filter(n => n.lane === lane.label);
+        return owned.length ? Math.max(...owned.map(n => n.w)) : 160;
+      });
+      const totalW = colsOf.reduce((s, w) => s + w, 0) + vs.length * LANE_M * 2;
+      let cx = minX;
+      vs.forEach((lane, i) => {
+        const w = colsOf[i] + LANE_M * 2;
+        lane.x = cx; lane.y = minY; lane.w = w; lane.h = Math.max(maxY - minY, 200);
+        cx += w;
+      });
+      constrainOwnedToLanes(swimlanes, nodes);
     }
-    // 把归入泳道的节点约束进各自泳道范围内（默认沿泳道中心线排布）
-    constrainOwnedToLanes(swimlanes, nodes);
+  }
+
+  const PAD = 26;
+  const ax = minX - PAD, ay = minY - PAD, aw = maxX - minX + PAD * 2, ah = maxY - minY + PAD * 2;
+  if (activityEdge) {
+    // 活动边框要包住所有泳道
+    let bx0 = ax, by0 = ay, bx1 = maxX + PAD, by1 = maxY + PAD;
+    for (const s of swimlanes || []) {
+      bx0 = Math.min(bx0, s.x - PAD / 2); by0 = Math.min(by0, s.y - PAD / 2);
+      bx1 = Math.max(bx1, s.x + s.w + PAD / 2); by1 = Math.max(by1, s.y + s.h + PAD / 2);
+    }
+    activityEdge.x = bx0; activityEdge.y = by0;
+    activityEdge.w = bx1 - bx0; activityEdge.h = by1 - by0;
   }
 }
 
 /* 把归入各泳道的节点收拢/约束回各自泳道范围内（本函数不移动泳道本身） */
 function constrainOwnedToLanes(swimlanes, nodes) {
-  const M = 14;
+  const M = 16;
   for (const lane of swimlanes) {
     const owned = nodes.filter(n => n.lane === lane.label && !n.fixedRel);
     if (!owned.length) continue;
     if (lane.dir === 'h') {
       const topY = lane.y + M;
       const bottomY = lane.y + lane.h - M;
-      owned.forEach((n, i) => {
-        n.x = Math.min(Math.max(n.x, lane.x + M), lane.x + lane.w - M);
-        n.y = Math.min(Math.max(n.y, topY + (bottomY - topY) * (i + 1) / (owned.length + 1), lane.y + M), lane.y + lane.h - M);
+      // 横条泳道：带内按「层（深度）序」自上而下堆叠；带内同一层的多个节点
+      // 沿 x 从左到右错开 —— if/else 分支就能并排呈现。
+      owned.sort((a, b) => a.y - b.y);
+      const rows = [];
+      for (const n of owned) {
+        const row = rows.find(r => Math.abs(r.y - n.y) <= 40);
+        if (row) { row.items.push(n); }
+        else rows.push({ y: n.y, items: [n] });
+      }
+      const laneL = lane.x + M, laneR = lane.x + lane.w - M;
+      const room = laneR - laneL;
+      const unitH = rows.length ? (bottomY - topY) / rows.length : 0;
+      rows.forEach((row, ri) => {
+        const cy = rows.length > 1 ? topY + (ri + 0.5) * unitH : (topY + bottomY) / 2;
+        const items = row.items;
+        if (items.length === 1) {
+          items[0].x = Math.min(Math.max(items[0].x, laneL + items[0].w / 2), laneR - items[0].w / 2);
+          items[0].y = cy;
+          return;
+        }
+        // 同层多节点：按原 x 顺序在带内从左到右铺开（间距自适应）
+        items.sort((a, b) => a.x - b.x);
+        const totalW = items.reduce((s, n) => s + n.w, 0);
+        const gap = Math.max(34, (room - totalW) / Math.max(1, items.length - 1));
+        const used = totalW + gap * (items.length - 1);
+        let cx = laneL + Math.max(0, (room - used) / 2);
+        for (const n of items) {
+          n.x = cx + n.w / 2;
+          n.y = cy;
+          cx += n.w + gap;
+        }
       });
     } else {
       const leftX = lane.x + M;
       const rightX = lane.x + lane.w - M;
-      owned.forEach((n, i) => {
-        n.y = Math.min(Math.max(n.y, lane.y + M), lane.y + lane.h - M);
-        n.x = Math.min(Math.max(n.x, leftX + (rightX - leftX) * (i + 1) / (owned.length + 1), lane.x + M), lane.x + lane.w - M);
-      });
+      owned.sort((a, b) => a.x - b.x);
+      const totalW = owned.reduce((s, n) => s + n.w, 0) + Math.max(0, owned.length - 1) * 30;
+      let cx = Math.max(leftX, (leftX + rightX) / 2 - totalW / 2);
+      for (const n of owned) {
+        n.y = Math.min(Math.max(n.y, lane.y + M + n.h / 2), lane.y + lane.h - M - n.h / 2);
+        n.x = cx + n.w / 2;
+        cx += n.w + 30;
+      }
+      if (owned.length && (owned[owned.length - 1].x + owned[owned.length - 1].w / 2) > rightX) {
+        const overflow = (owned[owned.length - 1].x + owned[owned.length - 1].w / 2) - rightX;
+        for (const n of owned) n.x -= overflow;
+      }
     }
   }
+  resolveOverlaps(nodes.filter(n => !n.fixedRel), 34, 28);
 }
 
 /* 折点/锚点引用匹配：先按书写方向精确匹配，匹配不到再接受反向写法。
@@ -741,13 +1185,37 @@ function normalizeUsecaseBoundary(model) {
     model.boundary.w = 388; model.boundary.h = 248;
   }
 
-  // ── 2. 框外元素排列在边界框左侧 ──
-  const outerLeft = model.boundary.x - 70;  // 边界左侧 70px
-  let cy = TOP_PAD + 20;
-  for (const n of outsideNodes) {
-    n.x = outerLeft;
-    n.y = cy;
-    cy += Math.max(n.h, title ? 100 : 80) + 24;
+  // ── 2. 框外角色排列在边界框左侧：纵向位置对齐它连的用例，减少连线交叉 ──
+  if (outsideNodes.length) {
+    const outerLeft = model.boundary.x - 70;
+    // 角色的「引力中心」= 它连的框内用例的平均 y（没有连线就给边界中线）
+    const anchors = outsideNodes.map(n => {
+      let sum = 0, cnt = 0;
+      for (const e of model.edges || []) {
+        const other = e.from === n.id ? e.to : (e.to === n.id ? e.from : null);
+        if (other) {
+          const t = boundNodes.find(b => b.id === other);
+          if (t) { sum += t.y; cnt++; }
+        }
+      }
+      return { n, want: cnt ? sum / cnt : (model.boundary.y + model.boundary.h / 2) };
+    });
+    // 按 want 排序后从上往下摆，保持互不重叠（贪心吸附到自己的目标位置）
+    anchors.sort((a, b) => a.want - b.want);
+    // 角色总跨度尽量不超过边界高度：间距随角色数压缩，最少 104
+    const BH = model.boundary.h - 60;
+    const naturalSpan = (outsideNodes.length - 1) * (Math.max(...outsideNodes.map(n => n.h), 96) + 30);
+    const pitch = outsideNodes.length > 1
+      ? Math.max(104, Math.min(Math.max(...outsideNodes.map(n => n.h), 96) + 30, BH / (outsideNodes.length - 1)))
+      : 0;
+    const startY = model.boundary.y + 30 + Math.max(0, (BH - naturalSpan) / 2);
+    let cursor = startY;
+    for (const a of anchors) {
+      const y = Math.max(cursor, a.want);
+      a.n.x = outerLeft;
+      a.n.y = y;
+      cursor = y + pitch;
+    }
   }
 
   // ── 3. 计算全部元素的整体包围盒，确保无负坐标 ──

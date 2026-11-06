@@ -144,7 +144,7 @@ function fsSave() {
   } catch (e) { /* 隐私模式 / 超配额：不影响使用，只是不记忆 */ }
 }
 
-/* 读回上次的树；返回 null 表示没有存档 */
+/* 读回上次的树；返回 null 表示没有存档（或存档还是没动过的老默认树） */
 function fsLoad() {
   let raw = null;
   try { raw = JSON.parse(localStorage.getItem(FS_KEY) || 'null'); } catch (e) { raw = null; }
@@ -153,6 +153,8 @@ function fsLoad() {
   fsRoot = fsDeserialize(raw.root);
   fsRoot.id = 'root';
   if (raw.seq && fsSeq <= raw.seq) fsSeq = raw.seq + 1;
+  // 老默认树（示例目录 + 散着的类图）直接换成新的默认树
+  if (fsIsOldDefault()) { fsRoot = null; return null; }
   fsCurrent = (raw.current && fsNode(raw.current)) ? raw.current : ((fsFirstFile() || {}).id || null);
   fsSelId = (raw.sel && fsNode(raw.sel)) ? raw.sel : fsCurrent;
   return raw;
@@ -168,19 +170,30 @@ function fsFirstFile(node) {
   return null;
 }
 
-/* 首次使用：给一棵能立刻上手的示例树（示例目录 + 当前默认图） */
+/* 首次使用：一个「新建目录」+ 打开示例里的类图，干净好上手 */
 function fsSeed() {
   fsSeq = 1;
   fsRoot = { id: 'root', kind: 'folder', name: '根目录', open: true, children: [] };
   const keys = (typeof SAMPLES === 'object' && SAMPLES) ? Object.keys(SAMPLES) : [];
   const defKey = keys.indexOf('类图 · 电商系统') >= 0 ? '类图 · 电商系统' : keys[0];
-  const demo = fsFolder('示例');
-  for (const k of keys) if (k !== defKey) demo.children.push(fsFile(SAMPLES[k]));
+  const folder = fsFolder('新建目录');
   const first = fsFile(defKey ? SAMPLES[defKey] : '');
-  fsRoot.children.push(first);
-  if (demo.children.length) fsRoot.children.push(demo);
+  folder.children.push(first);
+  fsRoot.children.push(folder);
   fsCurrent = first.id;
   fsSelId = first.id;
+}
+
+/* 上一版默认种子的形状：根目录下 10 张示例图（一张散着 + 一个「示例」目录）。
+   老用户没动过的话，换成新的默认树；动过的（有别的目录、删掉了示例等）原样保留。 */
+function fsIsOldDefault() {
+  if (!fsRoot || (fsRoot.children || []).length !== 2) return false;
+  const file = fsRoot.children.filter((c) => c.kind === 'file')[0];
+  const demo = fsRoot.children.filter((c) => c.kind === 'folder')[0];
+  if (!file || !demo || demo.name !== '示例') return false;
+  if (demo.children.some((c) => c.kind !== 'file')) return false;
+  const keys = (typeof SAMPLES === 'object' && SAMPLES) ? Object.keys(SAMPLES) : [];
+  return fsCountFiles(fsRoot) === keys.length;
 }
 
 /* ---------------- 增删改 ---------------- */
@@ -582,18 +595,30 @@ function fsOpenTreeMenu(evt, id) {
   menu.style.top = Math.min(Math.max(8, evt.clientY || 0), maxY) + 'px';
 }
 
-function fsConfirm(msg) {
-  if (typeof window !== 'undefined' && typeof window.confirm === 'function') return window.confirm(msg);
-  return true;
-}
-
+/* 删除前问一句：优先用页面的自定义弹窗（不用浏览器原生 confirm） */
 function fsDeleteWithConfirm(id) {
   const n = fsNode(id);
   if (!n || n === fsRoot) return false;
+  const count = n.kind === 'folder' ? fsCountFiles(n) : 0;
   const what = n.kind === 'folder'
-    ? `删除目录「${n.name}」${fsCountFiles(n) ? `及其中的 ${fsCountFiles(n)} 张图` : ''}？`
-    : `删除图「${fsDisplayName(n)}」？`;
-  if (!fsConfirm(what)) return false;
+    ? (count ? `「${n.name}」里的 ${count} 张图会一起删除。` : `目录「${n.name}」是空的。`)
+    : '这张图会从目录里移除。';
+  const title = n.kind === 'folder' ? '删除目录' : '删除图';
+  const name = n.kind === 'folder' ? n.name : fsDisplayName(n);
+
+  if (typeof askChoice === 'function') {
+    askChoice({
+      title,
+      message: `确定删除「${name}」？`,
+      extra: what + '\n删除后无法恢复。',
+      buttons: [{ id: 'del', label: '删除', primary: true, danger: true }]
+    }).then((choice) => { if (choice === 'del') fsDeleteNode(id); });
+    return true;
+  }
+  // 没有弹窗组件时退回原生确认
+  if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+    if (!window.confirm(`删除「${name}」？`)) return false;
+  }
   return fsDeleteNode(id);
 }
 

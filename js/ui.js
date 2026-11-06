@@ -107,7 +107,9 @@ bind('btn-doc', async () => {
 
 /* ---------------- 整个项目导入 / 导出 ---------------- */
 
-/* 通用选择弹窗：resolve 被点按钮的 id，取消则 null */
+/* 通用选择弹窗：resolve 被点按钮的 id，取消（按钮 / 点遮罩 / Esc）则 null */
+let askClose = null;
+
 function askChoice(opts) {
   return new Promise((resolve) => {
     const mask = document.getElementById('ask-mask');
@@ -128,14 +130,16 @@ function askChoice(opts) {
     const close = (val) => {
       if (closed) return;
       closed = true;
+      askClose = null;
       mask.classList.remove('is-open');
       mask.setAttribute('aria-hidden', 'true');
       resolve(val);
     };
+    askClose = close;
     for (const b of opts.buttons) {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'ask-btn' + (b.primary ? ' primary' : '');
+      btn.setAttribute('class', 'ask-btn' + (b.primary ? ' primary' : '') + (b.danger ? ' danger' : ''));
       btn.textContent = b.label;
       btn.addEventListener('click', () => close(b.id));
       actions.appendChild(btn);
@@ -143,8 +147,19 @@ function askChoice(opts) {
     if (cancel) cancel.onclick = () => close(null);
     mask.classList.add('is-open');
     mask.setAttribute('aria-hidden', 'false');
+    const first = actions.children[0];
+    if (first && first.focus) first.focus();
   });
 }
+
+/* 点遮罩关闭 / Esc 关闭：只挂一次 */
+(function bindAskDismiss() {
+  const mask = document.getElementById('ask-mask');
+  if (mask) mask.addEventListener('click', (e) => { if (e.target === mask && askClose) askClose(null); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && askClose) { e.preventDefault(); askClose(null); }
+  });
+})();
 
 const projInput = document.getElementById('file-project');
 bind('btn-proj-open', () => projInput && projInput.click());
@@ -206,6 +221,16 @@ bind('btn-reset', () => {
 });
 
 bind('btn-refresh', () => render({ force: true }));
+
+/* 折线开关：连线是否自动补直角折点（横平竖直）。
+ * 关闭时保持直线/斜线 —— 致密关联的复杂图有时斜线更直观。 */
+bind('btn-ortho', () => {
+  const next = setOrthoEnabled(!isOrthoEnabled());
+  const btn = document.getElementById('btn-ortho');
+  if (btn) btn.textContent = next ? '⛓ 折线：开' : '⛓ 折线：关';
+  render({ force: true });
+  setStatus(next ? '折线渲染：开（连线自动补直角折点）' : '折线渲染：关（保持直线/斜线）', 'ok');
+});
 
 /* ---------------- 分隔条拖拽（面板宽度可调） ---------------- */
 
