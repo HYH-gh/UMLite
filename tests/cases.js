@@ -248,11 +248,23 @@ var TEST_CASES = [
     }
   },
   {
-    name: '时序图：激活条必须显式声明（含第一条生命线）',
-    dsl: '@diagram sequence\nobject A\nobject B\nA -> B : 无激活也照常画',
+    name: '时序图：无 activate 时自动生成激活条',
+    dsl: '@diagram sequence\nobject A\nobject B\nA -> B : 无显式激活也自动生成',
     check(m, t) {
-      t.eq(m.activations.length, 0, '没有 activate 就不该有激活条');
       t.eq(m.messages.length, 1, '消息不受影响');
+      t.eq(m.activations.length, 2, 'A、B 各一条自动激活条');
+      t.ok(m.activations.every(a => a.auto), '标记为自动');
+      // A 只在第 0 行发消息；B 在第 0 行收消息 —— 段覆盖第 0 行
+      t.ok(m.activations.every(a => a.startRow < 0.01 && a.endRow > 0.4), '激活条覆盖消息行');
+    }
+  },
+  {
+    name: '时序图：自动激活条按间隔分段',
+    dsl: '@diagram sequence\nobject A\nobject B\nA -> B : 1\nB -> A : 2\nC -> D : 中间别人的消息\nB -> A : 3',
+    check(m, t) {
+      const bSegs = m.activations.filter(a => a.part === 'B');
+      t.eq(bSegs.length, 2, 'B 的消息被中间隔开，应分成两段');
+      t.ok(bSegs.every(a => a.auto), '均为自动条');
     }
   },
   {

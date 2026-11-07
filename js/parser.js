@@ -391,6 +391,7 @@ function parseSequence(lines) {
 
   let row = 0;
   const nextRow = () => row++;
+  let hasExplicitAct = false;   // 源码里出现过 activate/deactivate（老语法，兼容保留）
 
   for (const { text } of lines) {
     let m;
@@ -435,6 +436,7 @@ function parseSequence(lines) {
     // 3. 激活 / 去激活：全部显式声明，一段激活条 = 一对 activate/deactivate。
     //    同一生命线允许嵌套（消息会吸附到最外层的激活条上），但不画错位层级。
     if ((m = text.match(/^activate\s+(.+)$/i))) {
+      hasExplicitAct = true;
       const ref = readToken(m[1].trim())[0];
       if (!ref) continue;
       const p = ensurePart(ref, 'object');
@@ -443,6 +445,7 @@ function parseSequence(lines) {
       continue;
     }
     if ((m = text.match(/^deactivate\s+(.+)$/i))) {
+      hasExplicitAct = true;
       const ref = readToken(m[1].trim())[0];
       const r = nextRow();
       if (!ref) continue;
@@ -479,6 +482,59 @@ function parseSequence(lines) {
   const lastRow = Math.max(row - 1, 0);
   for (const a of activations) if (a.endRow < 0) a.endRow = lastRow;
   for (const fr of fragmentStack) fr.endRow = lastRow;
+
+  // 自动激活条：源码没有 activate/deactivate 时，按消息推断（UML 惯例 ——
+  // 参与者处理消息期间处于激活状态，激活条从第一条相关消息到最后一行相关消息）。
+  // 每位参与者把「收/发消息的行号」排序，把间隔 ≤1 行的归为一段连续处理，
+  // 一段 = 一条激活条；行号 ±0.5 让激活条恰好覆盖消息行之间的竖直间隔。
+  // 例外：
+  //  - 发出第一条消息的参与者（发起者）激活条从生命线顶开始（外部刺激触发）；
+  //  - 反身消息在其所属激活条上生成一个子激活焦点（嵌套小条，渲染层画在右侧）。
+  let firstActorRef = null;
+  if (messages.length) {
+    const firstMsg = messages.find(msg => !msg.create);   // create 消息前目标还不存在
+    if (firstMsg) firstActorRef = firstMsg.from;
+  }
+  if (!hasExplicitAct && messages.length) {
+    const rowsOf = new Map();
+    const selfRows = new Map();               // ref -> [反身消息行]（用于子激活焦点）
+    for (const msg of messages) {
+      if (msg.self) {
+        if (!selfRows.has(msg.from)) selfRows.set(msg.from, []);
+        selfRows.get(msg.from).push(msg.row);
+        // 反身消息也算参与：让发送方在该行有激活覆盖
+        if (!rowsOf.has(msg.from)) rowsOf.set(msg.from, []);
+        rowsOf.get(msg.from).push(msg.row);
+        continue;
+      }
+      for (const ref of [msg.from, msg.to]) {
+        if (!rowsOf.has(ref)) rowsOf.set(ref, []);
+        rowsOf.get(ref).push(msg.row);
+      }
+    }
+    for (const [ref, rows] of rowsOf) {
+      rows.sort((x, y) => x - y);
+      // 聚段：相邻两次参与之间隔了别人的行（行号差 >1）就断开成新段
+      let segStart = rows[0], prev = rows[0];
+      const segs = [];
+      for (let i = 1; i < rows.length; i++) {
+        if (rows[i] - prev > 1) { segs.push([segStart, prev]); segStart = rows[i]; }
+        prev = rows[i];
+      }
+      segs.push([segStart, prev]);
+      for (const [s, e] of segs) {
+        // 发起者的第一段：顶端从生命线顶（lifeTop）开始 —— 用行号 -2 标记，
+        // 布局层识别后把 startY 对齐到头部框下方
+        const isOriginHead = (ref === firstActorRef && s === rows[0]);
+        activations.push({
+          id: 'a' + activations.length, part: ref,
+          startRow: isOriginHead ? -2 : s - 0.5,
+          endRow: e + 0.5, auto: true,
+          selfRows: (selfRows.get(ref) || []).filter(r => r >= s && r <= e)
+        });
+      }
+    }
+  }
 
   return { nodes: [], edges: [], participants, messages, activations, fragments };
 }

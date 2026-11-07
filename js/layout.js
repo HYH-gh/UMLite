@@ -1009,9 +1009,11 @@ function layoutSequence(model) {
     if (m.row > maxRow) maxRow = m.row;
   }
   for (const a of model.activations) {
-    a.startY = rowY(a.startRow) + ROW_H / 2;
+    // 自动激活条 startRow=-2 表示「发起者从生命线顶开始」（外部刺激触发）
+    a.startY = a.startRow <= -2 ? (model.participants[0] ? model.participants[0].lifeTop + 8 : rowY(0))
+      : rowY(a.startRow) + ROW_H / 2;
     a.endY = a.endRow >= 0 ? rowY(a.endRow) + ROW_H / 2 : a.startY + ROW_H;
-    if (a.endRow > maxRow) maxRow = a.endRow;
+    if (a.endRow > maxRow) maxRow = Math.ceil(a.endRow);   // 自动激活条 endRow 带 .5
   }
 
   const partByRef = new Map(model.participants.map(p => [p.ref, p]));

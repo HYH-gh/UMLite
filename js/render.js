@@ -1036,16 +1036,20 @@ function seqMessageEl(m, partMap, activations) {
   const actX = (part, row) => part.x;
 
   if (m.self) {
-    // 反身消息：向右延伸后折返回自身激活条/生命线
+    // 反身消息：从激活条（或子激活焦点）右缘出发，向右延伸后折返回左缘。
+    // 有子焦点时（自动激活条为该行生成的嵌套小条），消息贴着子焦点两侧走。
     const x = actX(from, m.row);
+    const halfW = 9;
+    const hasSub = activations.some(a => a.part === m.from && a.auto && (a.selfRows || []).some(r => r === m.row));
+    const startX = hasSub ? x + halfW + 1 : x;   // 子焦点宽 8，中心在条右半
     const arm = 30;
     const seg = el('path', {
-      d: `M ${x} ${y} h ${arm} v 16 h -${arm}`,
+      d: `M ${startX} ${y} h+16 ${arm} v 16 h -${arm + halfW + 1}`,
       class: 'seq-msg' + (m.dash ? ' seq-msg-dashed' : ''),
       fill: 'none'
     });
     g.appendChild(seg);
-    seqArrowEl(x, y + 16, -1, m.fill ? 'fill' : 'open').forEach(e => g.appendChild(e));
+    seqArrowEl(startX - halfW + 15, y + 16, -1, m.fill ? 'fill' : 'open').forEach(e => g.appendChild(e));
     if (m.label) g.appendChild(el('text', { x: x + arm + 8, y: y + 8, class: 'seq-msg-text' }, m.label));
     if (m.create) g.appendChild(el('text', { x: x + arm + 8, y: y + 20, class: 'seq-create-tag' }, '«create»'));
     return g;
@@ -1161,6 +1165,19 @@ function buildSequenceContent(model) {
       x: cx - w / 2 - 2, y: topAct + hAct - EDGE / 2, width: w + 4, height: EDGE, rx: 2,
       fill: 'rgba(0,0,0,0)', 'pointer-events': 'all', 'data-act-edge': 'bottom', 'data-cidx': i, cursor: 'ns-resize'
     }));
+    // 反身消息的子激活焦点：嵌套小条画在激活条右半（UML 惯例 —— 自调用时
+    // 参与者进入嵌套的执行焦点）。小条顶 = 反身消息行中心，高约一行。
+    if (a.selfRows && a.selfRows.length) {
+      const SW = 8;   // 子焦点宽度（约主条一半）
+      for (const sr of a.selfRows) {
+        const msg = messages.find(mm => mm.self && mm.from === a.part && mm.row === sr);
+        const my = msg ? msg.y : (topAct + 20);
+        ag.appendChild(el('rect', {
+          x: cx - w / 2 + w - SW - 1, y: my + 15, width: SW * 2, height: SW * 2,
+          class: 'seq-activation'
+        }));
+      }
+    }
     actG.appendChild(ag);
   }
   g.appendChild(actG);
