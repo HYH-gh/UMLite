@@ -78,20 +78,24 @@ function layoutModel(model) {
   }
   normalizeToOrigin(model);
   if (model.type === 'activity') layoutActivityContainers(model);
-  // 最后统一给斜线补正交折点（bends 随最终坐标生成，normalizeToOrigin 的平移不会再动它们）
-  // 用例图用「横-竖-横」折法（actor 在左、用例在右，横向先走更自然），其余用「竖-横-竖」
-  // 可通过「折线」按钮全局开关（ORTHO_ENABLED），关掉时保留直线/斜线
-  if (ORTHO_ENABLED && model.type !== 'sequence' && model.type !== 'er') {
-    orthogonalEdgeRouting(model, { style: model.type === 'usecase' ? 'hvh' : 'vhv' });
-  }
+  // 折点生成已挪到 buildModel 的 applyLayout 之后：@layout 定位也在布局后应用，
+  // 折点必须按「最终坐标」计算才不会错位（见 buildModel）
 }
 
 /* ---------------- 连线折线开关 ----------------
- * 默认开：分层/树形布局后斜线自动补直角折点。
- * 有些图（致密关联、手调布局）斜线更直观，预览工具栏可一键切换。 */
-let ORTHO_ENABLED = true;
+ * 默认关：需要横平竖直连线时在预览工具栏开启「⛓ 折线」。
+ * 开启时在 applyLayout 之后按最终坐标给斜线补直角折点 —— 无论元素来自
+ * 默认布局还是 @layout 位置代码，折点都与实际渲染位置一致；关闭则恢复直线/斜线。 */
+let ORTHO_ENABLED = false;
 function setOrthoEnabled(v) { ORTHO_ENABLED = !!v; return ORTHO_ENABLED; }
 function isOrthoEnabled() { return ORTHO_ENABLED; }
+
+/* 按最终坐标给斜线补正交折点（在 applyLayout 之后调用）。
+ * 用例图用「横-竖-横」折法（actor 在左、用例在右，横向先走更自然），其余用「竖-横-竖」 */
+function applyOrthoBends(model) {
+  if (!ORTHO_ENABLED || model.type === 'sequence' || model.type === 'er') return;
+  orthogonalEdgeRouting(model, { style: model.type === 'usecase' ? 'hvh' : 'vhv' });
+}
 
 /* ---------------- 主入口 ---------------- */
 
@@ -111,5 +115,6 @@ function buildModel(src, opts) {
   prepareNodes(fresh);
   layoutModel(fresh);
   applyLayout(fresh);
+  applyOrthoBends(fresh);   // 折点按最终坐标（默认布局 + @layout 之后）生成
   return { model: fresh, sig, layoutSig, reused: false };
 }

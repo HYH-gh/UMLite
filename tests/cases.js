@@ -353,6 +353,17 @@ var TEST_CASES = [
     }
   },
   {
+    name: '@layout：图标题位置（title 行）',
+    dsl: '@diagram class "标题"\nA --> B\n@layout\ntitle @ (300, 60)\nA @ (100, 200)',
+    check(m, t) {
+      t.eq(m.layout[0].kind, 'title', '第一条为 title');
+      t.eq(m.titleX, 300, 'titleX 按 @layout 覆盖');
+      t.eq(m.titleY, 60, 'titleY 按 @layout 覆盖');
+      const A = m.nodes.find(n => n.id === 'A');
+      t.eq(A.x, 100, 'title 行不影响节点定位');
+    }
+  },
+  {
     name: '@layout：无法识别的行被宽容忽略',
     dsl: '@diagram class\nA\n@layout\nA @ (10, 20)\n这不是合法行\n@ (,,)',
     check(m, t) {

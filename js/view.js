@@ -18,6 +18,7 @@ let swimDragState = null;
 let bendDragState = null;
 let anchorDragState = null;
 let seqDrag = null;
+let titleDragState = null;
 let paintQueued = false;
 
 const preview = document.getElementById('preview');
@@ -187,6 +188,19 @@ function onNodePointerDown(evt) {
   if (evt.button !== 0) return;
   const id = evt.currentTarget.getAttribute('data-node-id');
   if (!currentModel || !currentModel.nodes) return;
+
+  // 图标题不是节点：拖动它改 titleX / titleY（会随「反写代码」写进 @layout 的 title 行）
+  if (id === TITLE_ID) {
+    evt.stopPropagation();
+    evt.preventDefault();
+    const pt = clientToBase(evt.clientX, evt.clientY);
+    const tx = currentModel.titleX != null ? currentModel.titleX : currentModel.contentW / 2;
+    const ty = currentModel.titleY != null ? currentModel.titleY : 40;
+    titleDragState = { offsetX: tx - pt.x, offsetY: ty - pt.y, moved: false };
+    document.body.style.cursor = 'grabbing';
+    return;
+  }
+
   const node = currentModel.nodes.find(n => n.id === id);
   if (!node) return;
 
@@ -553,6 +567,15 @@ document.addEventListener('pointermove', (evt) => {
     evt.preventDefault();
     return;
   }
+  if (titleDragState) {
+    const p = clientToBase(evt.clientX, evt.clientY);
+    currentModel.titleX = p.x + titleDragState.offsetX;
+    currentModel.titleY = p.y + titleDragState.offsetY;
+    titleDragState.moved = true;
+    schedulePaint();
+    evt.preventDefault();
+    return;
+  }
   if (dragState) {
     const p = clientToBase(evt.clientX, evt.clientY);
     dragState.node.x = p.x + dragState.offsetX;
@@ -599,6 +622,7 @@ document.addEventListener('pointermove', (evt) => {
 }, { passive: false });
 
 document.addEventListener('pointerup', () => {
+  if (titleDragState) { titleDragState = null; document.body.style.cursor = ''; }
   if (dragState) { dragState = null; document.body.style.cursor = ''; }
   if (panState) { panState = null; document.body.style.cursor = ''; }
   if (resizeState) { resizeState = null; document.body.style.cursor = ''; }
@@ -610,7 +634,7 @@ document.addEventListener('pointerup', () => {
   if (seqDrag) { seqDrag = null; document.body.style.cursor = ''; }
 });
 document.addEventListener('pointercancel', () => {
-  dragState = null; panState = null; resizeState = null; lifeDragState = null; actEdgeDrag = null; bendDragState = null; anchorDragState = null; swimDragState = null; seqDrag = null; document.body.style.cursor = '';
+  dragState = null; panState = null; resizeState = null; lifeDragState = null; actEdgeDrag = null; bendDragState = null; anchorDragState = null; swimDragState = null; seqDrag = null; titleDragState = null; document.body.style.cursor = '';
 });
 
 preview.addEventListener('wheel', (evt) => {
@@ -641,7 +665,7 @@ function pinchDistance() {
 /* 第二根手指按下时，把单指拖拽状态全部丢弃，避免「拖一半又缩放」 */
 function cancelActiveDrags() {
   dragState = panState = resizeState = lifeDragState = actEdgeDrag =
-    swimDragState = bendDragState = anchorDragState = seqDrag = null;
+    swimDragState = bendDragState = anchorDragState = seqDrag = titleDragState = null;
   document.body.style.cursor = '';
 }
 

@@ -1,5 +1,5 @@
 /* ==========================================================================
- *  页面级冒烟测试：在假 DOM 里按 UMLite.html 的顺序加载全部脚本
+ *  页面级冒烟测试：在假 DOM 里按 index.html 的顺序加载全部脚本
  *
  *  目的不是替代浏览器，而是把「页面能启动、能渲染、增量逻辑生效」变成一条命令：
  *    node tests/page.mjs   （或由 tests/run.mjs 一并执行）
@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 
-/* 与 UMLite.html 完全一致的加载顺序 */
+/* 与 index.html 完全一致的加载顺序 */
 const PAGE_SCRIPTS = [
   'js/util.js',
   'js/layoutcode.js',
@@ -471,28 +471,78 @@ export function runPageSmoke() {
     if (g('currentModel').edges[0].bends) throw new Error('撤销后折点应消失');
   });
 
-  run('折线开关：切换按钮影响重排与 bend 生成', () => {
-    // 斜放的三个 class：连线明显是斜线，折线开启时应有 bends
+  run('折线开关：默认关，开启按当前位置生成 bend', () => {
+    // 斜放的三个 class：连线明显是斜线
     editor().value = '@diagram class\nclass A\nclass B\nclass C\nA --> B\nB --> C\nA --> C';
     call('render', { force: true });
-    // 默认开：至少一条边被补了折点（渲染时正交化）
-    call('setOrthoEnabled', false);
-    call('render', { force: true });
+    // 默认关：没有自动折点
     if (g('currentModel').edges.some(e => e.bends && e.bends.length)) {
-      throw new Error('折线关闭后不应残留自动折点');
+      throw new Error('折线默认关闭，不应有自动折点');
     }
+    // 开启：斜线被补折点
     call('setOrthoEnabled', true);
     call('render', { force: true });
     if (!g('currentModel').edges.some(e => e.bends && e.bends.length)) {
       throw new Error('折线开启后应给斜线补折点');
     }
-    // 按钮文字随状态切换（假 DOM 用 fire 触发事件）
+    // 有 @layout 位置代码时折点按定位后的坐标生成：把三个元素排成横排，A-->C 应为直线（无折点）
+    editor().value = '@diagram class\nclass A\nclass B\nclass C\nA --> B\nB --> C\nA --> C\n@layout\nA @ (40, 300) 120 80\nB @ (300, 300) 120 80\nC @ (560, 300) 120 80';
+    call('setOrthoEnabled', true);
+    call('render', { force: true });
+    const ac = g('currentModel').edges.find(e => e.from === 'A' && e.to === 'C');
+    if (ac.bends && ac.bends.length) throw new Error('同一水平线上的连线不应有折点：' + JSON.stringify(ac.bends));
+    // 关闭：折点清空，恢复直线
+    call('setOrthoEnabled', false);
+    call('render', { force: true });
+    if (g('currentModel').edges.some(e => e.bends && e.bends.length)) {
+      throw new Error('折线关闭后不应残留自动折点');
+    }
+    // 按钮文字随点击切换（假 DOM 不解析 HTML 初始文本，只验证往返切换）
     const btn = dom.document.getElementById('btn-ortho');
     if (!btn) throw new Error('缺少 btn-ortho 按钮');
     btn.fire('click', {});
-    if (!/折线：关/.test(btn.textContent)) throw new Error('点击后按钮文字应变为「关」：' + btn.textContent);
+    if (!/折线：开/.test(btn.textContent)) throw new Error('点击后按钮文字应变为「开」：' + btn.textContent);
     btn.fire('click', {});
-    if (!/折线：开/.test(btn.textContent)) throw new Error('再次点击应恢复「开」：' + btn.textContent);
+    if (!/折线：关/.test(btn.textContent)) throw new Error('再次点击应恢复「关」：' + btn.textContent);
+  });
+
+  run('图标题可拖动：改 titleX/titleY 并写进 @layout 的 title 行', () => {
+    editor().value = '@diagram class "标题可拖"\nclass A\nclass B\nA --> B';
+    call('render', { force: true });
+    const m0 = model();
+    const x0 = m0.titleX, y0 = m0.titleY;
+    // 假 DOM 的 querySelectorAll 不返回元素，这里直接调用标题的 pointerdown 处理器
+    let stopped = false;
+    call('onNodePointerDown', {
+      button: 0, clientX: 0, clientY: 0,
+      currentTarget: { getAttribute: (k) => (k === 'data-node-id' ? '__title' : null) },
+      preventDefault() {}, stopPropagation() { stopped = true; }
+    });
+    if (!stopped) throw new Error('标题拖动应阻止事件冒泡（否则会变成画布平移）');
+    dom.document.fire('pointermove', { clientX: 60, clientY: 40 });
+    if (model().titleX === x0 && model().titleY === y0) throw new Error('拖动后标题坐标未变化');
+    dom.document.fire('pointerup');
+
+    // 反写代码：位置块里应带上 title 行，且能被重新解析回来
+    const block = call('serializeLayoutBlock', model());
+    if (!/^title @ \(/m.test(block)) throw new Error('位置块缺少 title 行：\n' + block);
+    const movedX = model().titleX, movedY = model().titleY;
+    call('render');   // 源码未变：复用上次模型，拖好的位置不会被冲掉
+    if (model().titleX !== movedX || model().titleY !== movedY) {
+      throw new Error('未改源码时，拖动后的标题位置应保持');
+    }
+    call('render', { force: true });   // 强制重排：回到默认居中的位置
+    if (model().titleX === movedX && model().titleY === movedY) {
+      throw new Error('强制重排后标题应回到默认位置');
+    }
+  });
+
+  run('图标题位置：@layout 的 title 行生效', () => {
+    editor().value = '@diagram class "定位标题"\nclass A\nclass B\nA --> B\n@layout\ntitle @ (420, 90)';
+    call('render', { force: true });
+    if (model().titleX !== 420 || model().titleY !== 90) {
+      throw new Error('title 行未生效：' + model().titleX + ',' + model().titleY);
+    }
   });
 
   run('窄屏标签切换：代码 / 预览 互斥显示', () => {

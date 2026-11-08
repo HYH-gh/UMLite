@@ -440,20 +440,28 @@ business actor|object|control|entity|boundary|worker <显示名> [as <短名>]  
 
 ### 7.3 激活条 / 控制焦点（Activation）
 
-激活条**全部显式声明**：一段激活条 = 一对 `activate` / `deactivate`，包括第一条生命线在内，任何激活条都必须在代码中写明，没有隐式推断。
+激活条**自动生成**：代码里只写消息，工具按 UML 惯例推断激活条 ——
+每位参与者的激活条自动覆盖其收/发消息的行区间；两次参与之间隔了别人的消息行时自动断开成多段。
+发出第一条消息的参与者（发起者）激活条从生命线顶部开始（外部刺激触发）；
+反身消息会在所属激活条上自动生成一个**子激活焦点**（嵌套小条）。
+
+不需要（也不应该）在代码中写任何激活语句；激活条仍可用上下端点手柄拖拽调整，
+也可用 `@layout` 的 `activation` 位置块精确定位（见 7.6）。
+
+**兼容语法（老代码专用）**：`activate` / `deactivate` 仍被完整支持 —— 只要源码中出现任一关键字，
+就切换为全显式模式，一段激活条 = 一对 `activate` / `deactivate`，不再自动生成：
 
 ```
 activate   参与者    从当前行开启一个激活条（覆盖在该生命线上的细长矩形）
 deactivate 参与者    闭合该参与者最近一个未闭合的激活条
 ```
 
-规则：
+显式模式规则：
 
 - 每个激活条都由一对 `activate` / `deactivate` 明确界定起止行；
 - 同一生命线上可以有多段激活条（前一段 `deactivate` 后可再次 `activate`），嵌套 `activate` 同一参与者也允许，多段都画在生命线正中、按声明顺序排列；
 - 文件末尾仍未 `deactivate` 的激活条自动延伸到内容底端；
-- 多余的 `deactivate`（没有可闭合的激活条）会被忽略，**不会**凭空生成激活条；
-- 消息线的端点吸附到参与者生命线上（激活条画在同一 x，视觉上正好被消息端点穿过）。
+- 多余的 `deactivate`（没有可闭合的激活条）会被忽略，**不会**凭空生成激活条。
 
 ### 7.4 组合片段（Combined Fragment）
 
@@ -483,32 +491,26 @@ entity 数据库 as DB
 object 网关 as Gateway
 
 用户 -> Browser : 输入账号密码
-activate Browser
 Browser -> Gateway : 转发登录请求
-activate Gateway
 Gateway ->> AuthService : 构造并发送令牌请求
-activate AuthService
 AuthService ->> DB : 查询用户记录
-activate DB
 DB --> AuthService : 返回用户数据
-deactivate DB
 alt 校验通过
     AuthService --> Gateway : 签发 JWT Token
 else 校验失败
     AuthService --> Gateway : 返回 401
 end
-deactivate AuthService
-// 同一生命线上可有多段激活条：再次激活 AuthService 记录审计
+// 反身消息：自动生成子激活焦点
 AuthService -> AuthService : 记录审计日志
-activate AuthService
-AuthService -> AuthService : 写入审计缓存
-AuthService --> AuthService : 审计完成
-deactivate AuthService
 Gateway -> 用户 : 200 OK + Token
-deactivate Gateway
 Browser -> Browser : 记录登录状态（反身消息）
-deactivate Browser
 ```
+
+上例没有任何激活语句：用户（发起者）的激活条从生命线顶开始，其余参与者的激活条
+自动覆盖各自收发消息的区间，DB 在「查询用户记录 → 返回用户数据」间有一小段激活，
+AuthService 的反身消息处出现子激活焦点。
+
+老写法（`activate` / `deactivate` 成对声明）仍然有效，见 7.3 的兼容说明。
 
 ### 7.6 位置定位（@layout）
 
@@ -516,6 +518,7 @@ deactivate Browser
 
 ```
 @layout
+title @ (x, y)                      图标题中心点（各图通用，拖动标题后自动写入）
 lifeBottom y                           全部生命线统一底部高度（y）
 participant 用户 @ (x, y) w h       参与者框中心点与宽高
 message 0 @ (_, y)                  第 0 条消息（序号），仅约束纵向 y；_ 表示水平不约束
@@ -525,6 +528,7 @@ fragment 2 @ (x, y) w h             第 2 个组合片段，左上角与宽高�
 
 此处坐标为画布绝对坐标（不受代码中的行序/默认自动布局影响）。画布内拖动元素后执行“导出 / 反写代码”，会自动把当前位置写回该位置块，实现双向 round-trip。
 
+- 图标题：直接拖动画布上的标题文字即可移动（`title` 行），不写该行时标题默认居中置顶
 - 参与者：平移（x/y）
 - 激活条、消息：仅纵向
 - 组合片段：平移（x/y）+ 大小调整（拖动四角，w/h）

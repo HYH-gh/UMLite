@@ -72,6 +72,13 @@ function parseLayoutBlock(lines, type) {
                  h: lm[6] != null ? parseFloat(lm[6]) : undefined });
       continue;
     }
+    // 图标题位置：title @ (x, y)　标题基线中心（画布坐标）
+    const tl = raw.match(/^title\s+@\s*\(\s*([-+0-9.]+)\s*,\s*([-+0-9.]+)\s*\)\s*$/i);
+    if (tl) {
+      const tx = parseFloat(tl[1]), ty = parseFloat(tl[2]);
+      if (!isNaN(tx) && !isNaN(ty)) out.push({ kind: 'title', x: tx, y: ty });
+      continue;
+    }
     // 连线折点：edge <起点>-><终点> bend <序号> @ (x, y)　坐标即折点绝对位置，序号为沿线(bends)顺序
     const be = raw.match(/^edge\s+(.+?)\s*->\s*(.+?)\s+bend\s+(\d+)\s+@\s*\(\s*([-+0-9.]+)\s*,\s*([-+0-9.]+)\s*\)\s*$/i);
     if (be) {
@@ -151,6 +158,10 @@ function serializeLayoutBlock(model) {
   }
 
   const lines = [LAYOUT_KEY];
+  // 图标题（拖动过才有独立位置；拖到默认位置时也照常导出，保证往返一致）
+  if (model.title && model.titleX != null && model.titleY != null) {
+    lines.push(`title @ (${_r(model.titleX)}, ${_r(model.titleY)})`);
+  }
   for (const n of model.nodes || []) {
     if (n.kind === 'pseudo') continue;
     lines.push(`${n.label} @ (${_r(n.x)}, ${_r(n.y)}) ${_r(n.w)} ${_r(n.h)}`);

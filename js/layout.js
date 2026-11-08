@@ -476,22 +476,48 @@ function layoutUsecaseInner(model) {
     }
   }
 
-  // 摆放：椭圆较扁，层间距按最高椭圆
+  // 摆放：椭圆较扁，层间距按最高椭圆。
+  // 层宽超限时层内折行（网格化），避免「长条形」布局 —— 行数按层宽与
+  // 目标宽估算，让整体接近方形；Barycenter 顺序在折行时保持。
   const COL_GAP = 36, ROW_GAP = 34;
+  const widths0 = layers.map(ly => ly.reduce((s, nd) => s + nd.w, 0) + Math.max(0, ly.length - 1) * COL_GAP);
+  // 目标宽：最宽层的 60% 与平均层宽的 1.6 倍折中，再夹到 [560, 1050]
+  const avgW = widths0.reduce((s, w) => s + w, 0) / Math.max(1, widths0.filter(w => w > 0).length);
+  const targetW = Math.max(560, Math.min(1050, Math.round(Math.max(avgW * 1.6, Math.max(...widths0) * 0.6))));
+  // 把超宽的层折成多行：按 Barycenter 顺序切块，行内总宽 ≤ targetW
+  const rows = [];   // [{ nds, di }]
+  layers.forEach((ly, di) => {
+    const w0 = widths0[di];
+    const nRows = Math.max(1, Math.ceil(w0 / targetW));
+    if (nRows === 1) { rows.push({ nds: ly, di }); return; }
+    // 均匀按宽度切块（保持顺序）
+    const total = ly.reduce((s, nd) => s + nd.w, 0);
+    const perRow = total / nRows;
+    let acc = 0, cur = [];
+    const pushed = () => rows.filter(r => r.di === di).length;
+    for (const nd of ly) {
+      acc += nd.w;
+      cur.push(nd);
+      if (acc >= perRow && pushed() < nRows - 1) {
+        rows.push({ nds: cur, di }); cur = []; acc = 0;
+      }
+    }
+    if (cur.length) rows.push({ nds: cur, di });
+  });
+  // 逐行摆放（行的左右位置在最后统一居中）
   let y = 0;
-  for (const ly of layers) {
-    if (!ly.length) { y += 40; continue; }
-    const rowH = Math.max(...ly.map(nd => nd.h));
+  for (const row of rows) {
+    const rowH = Math.max(...row.nds.map(nd => nd.h));
     let x = 0;
-    for (const nd of ly) { nd.x = x + nd.w / 2; nd.y = y + rowH / 2; x += nd.w + COL_GAP; }
+    for (const nd of row.nds) { nd.x = x + nd.w / 2; nd.y = y + rowH / 2; x += nd.w + COL_GAP; }
+    row.w = x - COL_GAP;
     y += rowH + ROW_GAP;
   }
-  const widths = layers.map(ly => ly.reduce((s, nd) => s + nd.w, 0) + Math.max(0, ly.length - 1) * COL_GAP);
-  const maxW = Math.max(...widths, 1);
-  layers.forEach((ly, di) => {
-    const off = (maxW - widths[di]) / 2;
-    for (const nd of ly) nd.x += off;
-  });
+  const maxW = Math.max(...rows.map(r => r.w), 1);
+  for (const row of rows) {
+    const off = (maxW - row.w) / 2;
+    for (const nd of row.nds) nd.x += off;
+  }
   resolveOverlaps(nodes, 40, 30);
 }
 
@@ -878,9 +904,12 @@ function applyLayout(model) {
     applySeqLayout(model);
     return;
   }
-  // 第一遍：一级定位（节点、边界、泳道）用绝对坐标
+  // 第一遍：一级定位（节点、边界、泳道、图标题）用绝对坐标
   for (const item of L) {
-    if (item.kind === 'node') {
+    if (item.kind === 'title') {
+      model.titleX = item.x;
+      model.titleY = item.y;
+    } else if (item.kind === 'node') {
       const n = model.nodes && model.nodes.find(nd => nd.id === item.name || nd.label === item.name);
       if (n) {
         n.x = item.x; n.y = item.y;
@@ -1044,6 +1073,7 @@ function layoutSequence(model) {
 
   model.lifeBottom = Math.max(lifeBottom, firstRowY + (maxRow + 1) * ROW_H + 60);
   model.contentH = model.lifeBottom;
+  model.titleX = model.contentW / 2;
   model.titleY = 28;
   return { width: model.contentW, height: model.contentH };
 }
@@ -1053,7 +1083,10 @@ function applySeqLayout(model) {
   const L = model.layout;
   if (!L || !L.length) return;
   for (const item of L) {
-    if (item.kind === 'seqPart') {
+    if (item.kind === 'title') {
+      model.titleX = item.x;
+      model.titleY = item.y;
+    } else if (item.kind === 'seqPart') {
       const p = model.participants.find(pp => pp.ref === item.name || pp.label === item.name);
       if (p) {
         p.x = item.x;
@@ -1187,36 +1220,69 @@ function normalizeUsecaseBoundary(model) {
     model.boundary.w = 388; model.boundary.h = 248;
   }
 
-  // ── 2. 框外角色排列在边界框左侧：纵向位置对齐它连的用例，减少连线交叉 ──
-  if (outsideNodes.length) {
-    const outerLeft = model.boundary.x - 70;
-    // 角色的「引力中心」= 它连的框内用例的平均 y（没有连线就给边界中线）
-    const anchors = outsideNodes.map(n => {
-      let sum = 0, cnt = 0;
+  // ── 2. 框外角色：按所连用例的位置分到边界左右两侧，缩短连线、避免一条长竖列 ──
+  //    只有角色（actor / businessactor）参与侧列；注释框、未标 :boundary 的游离元素
+  //    统一排到边界下方，不混进角色列
+  const isActor = n => n.kind === 'actor' || n.kind === 'businessactor';
+  const notices = outsideNodes.filter(n => !isActor(n));
+  const actorOuts = outsideNodes.filter(isActor);
+  if (actorOuts.length) {
+    const bx0 = model.boundary.x, bw = model.boundary.w;
+    const centerX = bx0 + bw / 2;
+    // 角色的「引力中心」= 它连的框内用例的平均位置（无连线则取边界中心）
+    const anchors = actorOuts.map(n => {
+      let sx = 0, sy = 0, cnt = 0;
       for (const e of model.edges || []) {
         const other = e.from === n.id ? e.to : (e.to === n.id ? e.from : null);
-        if (other) {
-          const t = boundNodes.find(b => b.id === other);
-          if (t) { sum += t.y; cnt++; }
-        }
+        if (!other) continue;
+        const t = boundNodes.find(b => b.id === other);
+        if (t) { sx += t.x; sy += t.y; cnt++; }
       }
-      return { n, want: cnt ? sum / cnt : (model.boundary.y + model.boundary.h / 2) };
+      return {
+        n,
+        wantX: cnt ? sx / cnt : centerX,
+        wantY: cnt ? sy / cnt : (model.boundary.y + model.boundary.h / 2)
+      };
     });
-    // 按 want 排序后从上往下摆，保持互不重叠（贪心吸附到自己的目标位置）
-    anchors.sort((a, b) => a.want - b.want);
-    // 角色总跨度尽量不超过边界高度：间距随角色数压缩，最少 104
-    const BH = model.boundary.h - 60;
-    const naturalSpan = (outsideNodes.length - 1) * (Math.max(...outsideNodes.map(n => n.h), 96) + 30);
-    const pitch = outsideNodes.length > 1
-      ? Math.max(104, Math.min(Math.max(...outsideNodes.map(n => n.h), 96) + 30, BH / (outsideNodes.length - 1)))
-      : 0;
-    const startY = model.boundary.y + 30 + Math.max(0, (BH - naturalSpan) / 2);
-    let cursor = startY;
-    for (const a of anchors) {
-      const y = Math.max(cursor, a.want);
-      a.n.x = outerLeft;
-      a.n.y = y;
-      cursor = y + pitch;
+    // 分列：目标偏右的角色放右边，其余放左边（各列内部再按目标 y 排序）
+    const leftSide = anchors.filter(a => a.wantX <= centerX).sort((p, q) => p.wantY - q.wantY);
+    const rightSide = anchors.filter(a => a.wantX > centerX).sort((p, q) => p.wantY - q.wantY);
+    // 一侧角色过多时折成多列（每列最多 6 个），列越靠外 x 越远
+    const COL_GAP = 54;
+    const maxPerCol = 6;
+    const placeSide = (list, side) => {
+      if (!list.length) return;
+      const nCols = Math.ceil(list.length / maxPerCol);
+      const perCol = Math.ceil(list.length / nCols);
+      for (let ci = 0; ci < nCols; ci++) {
+        const group = list.slice(ci * perCol, (ci + 1) * perCol);
+        if (!group.length) continue;
+        // 列内纵向：按目标 y 依次摆，间距压缩到 96~124，整体围绕目标带居中
+        const pitch = 108;
+        const span = (group.length - 1) * pitch;
+        const meanY = group.reduce((s, a) => s + a.wantY, 0) / group.length;
+        const lo = model.boundary.y + 40, hi = model.boundary.y + model.boundary.h - 40;
+        let start = meanY - span / 2;
+        start = Math.max(lo, Math.min(hi - span, start));
+        const colW = Math.max(...group.map(a => a.n.w), 60);
+        const x = side === 'left'
+          ? bx0 - 70 - ci * (colW + COL_GAP)
+          : bx0 + bw + 70 + ci * (colW + COL_GAP);
+        group.forEach((a, i) => { a.n.x = x; a.n.y = start + i * pitch; });
+      }
+    };
+    placeSide(leftSide, 'left');
+    placeSide(rightSide, 'right');
+  }
+
+  // ── 2b. 其余框外元素（注释框、未标 :boundary 的游离元素）摆在边界框下方，横向依次排开 ──
+  if (notices.length) {
+    let nx = model.boundary.x;
+    const ny = model.boundary.y + model.boundary.h + 56;
+    for (const nt of notices) {
+      nt.x = nx + nt.w / 2;
+      nt.y = ny + nt.h / 2;
+      nx += nt.w + 32;
     }
   }
 

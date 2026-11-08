@@ -222,14 +222,14 @@ bind('btn-reset', () => {
 
 bind('btn-refresh', () => render({ force: true }));
 
-/* 折线开关：连线是否自动补直角折点（横平竖直）。
- * 关闭时保持直线/斜线 —— 致密关联的复杂图有时斜线更直观。 */
+/* 折线开关：连线是否自动补直角折点（横平竖直）。默认关；
+ * 开启时按最终渲染位置（含 @layout 定位）生成折点，关闭恢复直线/斜线。 */
 bind('btn-ortho', () => {
   const next = setOrthoEnabled(!isOrthoEnabled());
   const btn = document.getElementById('btn-ortho');
   if (btn) btn.textContent = next ? '⛓ 折线：开' : '⛓ 折线：关';
   render({ force: true });
-  setStatus(next ? '折线渲染：开（连线自动补直角折点）' : '折线渲染：关（保持直线/斜线）', 'ok');
+  setStatus(next ? '折线渲染：开（按当前位置生成直角折点）' : '折线渲染：关（保持直线/斜线）', 'ok');
 });
 
 /* ---------------- 分隔条拖拽（面板宽度可调） ---------------- */

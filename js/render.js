@@ -131,6 +131,9 @@ function addDiamond(g, tip, angle, filled) {
   }));
 }
 
+/* 图标题的 drag id：标题不是节点，拖拽时按这个 id 分支处理 */
+const TITLE_ID = '__title';
+
 /* E-R 关系端点：鸦爪记法（crow's foot）
    四种基数 — one / zeroOne / oneMany / zeroMany。
    以 tip 为连线进入元素边框的点、angle 为「顺着连线指向元素」的方向，
@@ -939,7 +942,8 @@ function buildGraphContent(model) {
 
   if (model.title) {
     root.appendChild(el('text', {
-      x: model.titleX, y: model.titleY, 'text-anchor': 'middle', class: 'title-text'
+      x: model.titleX, y: model.titleY, 'text-anchor': 'middle', class: 'title-text',
+      'data-node-id': TITLE_ID, 'data-title': '1'
     }, model.title));
   }
 
@@ -1090,7 +1094,8 @@ function buildSequenceContent(model) {
 
   if (title) {
     g.appendChild(el('text', {
-      x: W / 2, y: model.titleY, 'text-anchor': 'middle', class: 'title-text'
+      x: model.titleX != null ? model.titleX : W / 2, y: model.titleY, 'text-anchor': 'middle',
+      class: 'title-text', 'data-node-id': TITLE_ID, 'data-title': '1'
     }, title));
   }
 

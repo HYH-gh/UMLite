@@ -4,7 +4,7 @@
  *    ① docs/CHANGELOG.md        更新文档（人写）
  *    ② js/changelog.js          页面数据（由 ① 生成）
  *    ③ README.md                顶部版本徽标
- *    ④ UMLite.html              版本号胶囊按钮的初始文案
+ *    ④ index.html              版本号胶囊按钮的初始文案
  *
  *  规则：版本号 1.XX，XX = git 提交次数。任一不同步就在这里失败，
  *  省得发出去的页面写着旧版本、公告却停在上一版。
@@ -60,9 +60,9 @@ export function runReleaseChecks() {
     if (readme.indexOf('v' + cur) < 0 && readme.indexOf(cur) < 0) {
       throw new Error('README 里没有当前版本号 v' + cur);
     }
-    const html = read('UMLite.html');
+    const html = read('index.html');
     const m = html.match(/id="ver-chip"[^>]*>([^<]*)</);
-    if (!m) throw new Error('UMLite.html 里找不到 #ver-chip 的初始文案');
+    if (!m) throw new Error('index.html 里找不到 #ver-chip 的初始文案');
     if (m[1].trim() !== 'v' + cur) throw new Error(`版本号胶囊写的是 ${m[1].trim()}，应为 v${cur}`);
   });
 
