@@ -259,12 +259,16 @@ var TEST_CASES = [
     }
   },
   {
-    name: '时序图：自动激活条按间隔分段',
+    name: '时序图：自动激活条每位参与者一整条（不按间隔分段）',
     dsl: '@diagram sequence\nobject A\nobject B\nA -> B : 1\nB -> A : 2\nC -> D : 中间别人的消息\nB -> A : 3',
     check(m, t) {
       const bSegs = m.activations.filter(a => a.part === 'B');
-      t.eq(bSegs.length, 2, 'B 的消息被中间隔开，应分成两段');
+      t.eq(bSegs.length, 1, 'B 只有一整条激活条（中间隔着别人的消息也不断开）');
       t.ok(bSegs.every(a => a.auto), '均为自动条');
+      // 从 B 第一次参与（第 0 行）盖到最后一次参与（第 3 行）
+      t.eq(bSegs[0].startRow, -0.5, '起于第一次参与的消息行');
+      t.eq(bSegs[0].endRow, 3.5, '止于最后一次参与的消息行');
+      t.eq(m.activations.length, 4, 'A / B / C / D 各一条');
     }
   },
   {

@@ -41,6 +41,9 @@
      linear-gradient(90deg,rgba(0,0,0,.025) 1px,transparent 1px) 0 0/22px 22px,
      linear-gradient(rgba(0,0,0,.025) 1px,transparent 1px) 0 0/22px 22px, #fbfcfe;
      position:relative;}
+  /* 简约配色：画布底面换成纯色纸面（图形自带浅色渐变底，不再需要网格参照） */
+  body[data-theme="plain"] #right{background:
+     linear-gradient(180deg,#f7f9fd,#e9eef7);}
   .pane-head{
     flex:0 0 auto;padding:6px 14px;font-size:11.5px;color:var(--muted);
     border-bottom:1px solid var(--border);background:#fafbfe;

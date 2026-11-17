@@ -822,6 +822,17 @@ function layoutActivityContainers(model) {
     activityEdge.x = bx0; activityEdge.y = by0;
     activityEdge.w = bx1 - bx0; activityEdge.h = by1 - by0;
   }
+
+  // 泳道可能被撑得比节点包围盒更大（横条泳道最小 940 宽）：同步画布尺寸，
+  // 否则 fitView 按旧尺寸适配会把泳道裁掉一截
+  let right = maxX, bottom = maxY;
+  for (const s of swimlanes || []) {
+    right = Math.max(right, s.x + s.w);
+    bottom = Math.max(bottom, s.y + s.h);
+  }
+  const PADC = 26;
+  model.contentW = Math.max(model.contentW || 0, right + PADC);
+  model.contentH = Math.max(model.contentH || 0, bottom + PADC);
 }
 
 /* 把归入各泳道的节点收拢/约束回各自泳道范围内（本函数不移动泳道本身） */
@@ -1007,17 +1018,24 @@ function applyLayout(model) {
 /* -------- 时序图布局 -------- */
 
 function layoutSequence(model) {
-  const PAD = 44, GAP = 64;
+  const PAD = 32, GAP = 14;
   const TOP = 24;
   const titleH = model.title ? 48 : 0;
   const BOX_H = 96;
   const HEAD_TOP = TOP + titleH;
+  // 参与者标签的放大倍数（与 render.js 的 SEQ_ZOOM 对应）：图标参与者的名称
+  // 画在图标下方并按 1.5 倍放大，列宽要按放大后的文字宽算，否则相邻列会撞在一起
+  const LABEL_SCALE = 1.5;
 
   // 参与者 X 坐标（LifeLine 中心）与头部框
   let x = PAD;
   for (const p of model.participants) {
-    const iconW = p.kind === 'object' ? 6 : 26;
-    p.w = Math.max(textWidth(p.label, 13, '600') + iconW * 1.5 + 42, 140);
+    const labelW = textWidth(p.label, 13, '600');
+    // 列宽只按「标签实际渲染宽度 + 一点余量」算：原来的固定 140 下限会让整张图
+    // 被撑得很宽，缩放适配后文字显得很小
+    p.w = p.kind === 'object'
+      ? Math.max(labelW + 26, 96)                       // 对象：名称画在框内（不放大）
+      : Math.max(labelW * LABEL_SCALE + 10, 96);
     p.h = BOX_H;
     p.x = x + p.w / 2;
     p.y = HEAD_TOP + BOX_H / 2;
@@ -1037,15 +1055,16 @@ function layoutSequence(model) {
     m.y = rowY(m.row);
     if (m.row > maxRow) maxRow = m.row;
   }
+  const partByRef = new Map(model.participants.map(p => [p.ref, p]));
   for (const a of model.activations) {
     // 自动激活条 startRow=-2 表示「发起者从生命线顶开始」（外部刺激触发）
-    a.startY = a.startRow <= -2 ? (model.participants[0] ? model.participants[0].lifeTop + 8 : rowY(0))
+    const owner = partByRef.get(a.part) || model.participants[0];
+    a.startY = a.startRow <= -2 ? (owner ? owner.lifeTop + 8 : rowY(0))
       : rowY(a.startRow) + ROW_H / 2;
     a.endY = a.endRow >= 0 ? rowY(a.endRow) + ROW_H / 2 : a.startY + ROW_H;
     if (a.endRow > maxRow) maxRow = Math.ceil(a.endRow);   // 自动激活条 endRow 带 .5
   }
 
-  const partByRef = new Map(model.participants.map(p => [p.ref, p]));
   // 生命线底端
   const lifeBottom = firstRowY + (maxRow + 1) * ROW_H + 70;
 

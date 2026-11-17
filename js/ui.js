@@ -232,6 +232,20 @@ bind('btn-ortho', () => {
   setStatus(next ? '折线渲染：开（按当前位置生成直角折点）' : '折线渲染：关（保持直线/斜线）', 'ok');
 });
 
+/* 配色方案切换：色彩（原有）/ 简约（参考 EA）。
+ * 切换只换主题 token 表并重绘，模型、坐标、代码一概不动。 */
+function syncThemeButton() {
+  const btn = document.getElementById('btn-theme');
+  if (btn) btn.textContent = '🎨 配色：' + T.label;
+}
+bind('btn-theme', () => {
+  const next = setTheme(currentThemeId() === 'plain' ? 'color' : 'plain');
+  syncThemeButton();
+  if (currentModel) paint();
+  setStatus(`配色方案：${THEMES[next].label}（只影响显示，代码与位置不变）`, 'ok');
+});
+syncThemeButton();
+
 /* ---------------- 分隔条拖拽（面板宽度可调） ---------------- */
 
 const divider = document.getElementById('divider');

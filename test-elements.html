@@ -27,6 +27,7 @@
 <div id="wrap"></div>
 
 <script src="js/util.js"></script>
+<script src="js/theme.js"></script>
 <script src="js/layoutcode.js"></script>
 <script src="js/parser.js"></script>
 <script src="js/layout.js"></script>
@@ -72,6 +73,8 @@
       vp = el('g', {});
       vp.appendChild(content);
       svg.appendChild(styleEl(svgStyle()));
+      const tdefs = themeDefsEl();
+      if (tdefs) svg.appendChild(tdefs);
       svg.appendChild(vp);
     } catch (err) {
       svg.appendChild(styleEl(svgStyle()));

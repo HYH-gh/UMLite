@@ -16,9 +16,10 @@ import { runReleaseChecks } from './release.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 
-/* 与 UMLite.html 保持一致：这些都是纯逻辑脚本，不碰真实 DOM */
+/* 与 index.html 保持一致：这些都是纯逻辑脚本，不碰真实 DOM */
 const SCRIPTS = [
   'js/util.js',
+  'js/theme.js',
   'js/layoutcode.js',
   'js/parser.js',
   'js/layout.js',

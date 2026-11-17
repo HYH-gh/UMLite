@@ -21,7 +21,9 @@ const ROOT = path.resolve(HERE, '..');
 
 /* 与 index.html 完全一致的加载顺序 */
 const PAGE_SCRIPTS = [
+  'js/icons.js',
   'js/util.js',
+  'js/theme.js',
   'js/layoutcode.js',
   'js/parser.js',
   'js/layout.js',
@@ -504,6 +506,59 @@ export function runPageSmoke() {
     if (!/折线：开/.test(btn.textContent)) throw new Error('点击后按钮文字应变为「开」：' + btn.textContent);
     btn.fire('click', {});
     if (!/折线：关/.test(btn.textContent)) throw new Error('再次点击应恢复「关」：' + btn.textContent);
+  });
+
+  run('配色：两套方案的 token 键完全一致（新增配色不会漏样式）', () => {
+    const themes = g('THEMES');
+    const a = Object.keys(themes.color).sort();
+    const b = Object.keys(themes.plain).sort();
+    const miss = a.filter(k => b.indexOf(k) < 0).concat(b.filter(k => a.indexOf(k) < 0));
+    if (miss.length) throw new Error('两套配色的 token 不一致：' + miss.join(', '));
+    if (!themes.color.label || !themes.plain.label) throw new Error('配色缺少中文名');
+    if (g('currentThemeId')() !== 'color') throw new Error('默认配色应为「色彩」，实际 ' + g('currentThemeId')());
+  });
+
+  run('配色：切换只换样式，模型与坐标完全不变', () => {
+    editor().value = '@diagram class "配色测试"\nclass A\nclass B\nA --> B';
+    call('render', { force: true });
+    const m0 = model();
+    const pos0 = JSON.stringify(m0.nodes.map(n => [n.id, n.x, n.y, n.w, n.h]));
+    const css0 = g('svgStyle')();
+    if (css0.indexOf('#e0e7ff') < 0) throw new Error('色彩主题的标题栏色没进样式表');
+    const btn = dom.document.getElementById('btn-theme');
+    if (!btn) throw new Error('缺少 btn-theme 按钮');
+    if (btn.textContent.indexOf('色彩') < 0) throw new Error('按钮初始文案不对：' + btn.textContent);
+
+    btn.fire('click', {});
+    const css1 = g('svgStyle')();
+    if (css1 === css0) throw new Error('切换配色后样式表没变化');
+    if (css1.indexOf('#e0e7ff') >= 0) throw new Error('简约配色不应残留色彩主题的色值');
+    if (css1.indexOf('#000000') < 0) throw new Error('简约配色应是黑色细描边');
+    if (g('currentModel') !== m0) throw new Error('切换配色不应重建模型');
+    if (JSON.stringify(m0.nodes.map(n => [n.id, n.x, n.y, n.w, n.h])) !== pos0) throw new Error('切换配色改动了坐标');
+    if (!/简约/.test(btn.textContent)) throw new Error('按钮文字没跟着变：' + btn.textContent);
+    if (!/配色方案：简约/.test(status())) throw new Error('状态栏没提示当前配色：' + status());
+
+    btn.fire('click', {});
+    if (g('svgStyle')() !== css0) throw new Error('切回色彩后样式表应与原来一致');
+  });
+
+  run('配色：简约主题的渐变 / 投影定义随 SVG 一起生成', () => {
+    call('setTheme', 'plain');
+    const defs = g('themeDefsEl')();
+    if (!defs) throw new Error('简约配色应生成 <defs>');
+    const kinds = defs.children.map(c => c.tagName);
+    if (kinds.indexOf('linearGradient') < 0) throw new Error('缺少线性渐变定义');
+    if (kinds.indexOf('filter') < 0) throw new Error('缺少投影滤镜');
+    call('setTheme', 'color');
+    if (g('themeDefsEl')()) throw new Error('色彩配色不需要额外定义');
+  });
+
+  run('配色：选择记在 localStorage，下次打开沿用', () => {
+    call('setTheme', 'plain');
+    if (sandbox.localStorage.getItem('umlite.theme') !== 'plain') throw new Error('没记住配色选择');
+    call('setTheme', 'color');
+    if (sandbox.localStorage.getItem('umlite.theme') !== 'color') throw new Error('切回后没更新记忆');
   });
 
   run('图标题可拖动：改 titleX/titleY 并写进 @layout 的 title 行', () => {

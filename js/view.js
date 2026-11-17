@@ -84,6 +84,9 @@ function paint() {
     height: H
   });
   svgEl.appendChild(styleEl(svgStyle()));
+  // 当前配色需要的渐变 / 投影定义（导出 SVG、PNG 时一并带走）
+  const themeDefs = themeDefsEl();
+  if (themeDefs) svgEl.appendChild(themeDefs);
 
   const content = currentModel.type === 'sequence'
     ? buildSequenceContent(currentModel)

@@ -1,76 +1,10 @@
 /* ==========================================================================
  *  渲染层
+ *
+ *  只负责「画在哪、画多大、写什么字」；「长什么样」（颜色 / 字体 / 线宽 /
+ *  圆角 / 阴影）全部来自 js/theme.js 的 token 表（当前主题 = T）。
+ *  改配色不需要动这个文件。
  * ========================================================================== */
-
-const SVG_CSS = `
-.node-box{fill:#ffffff;stroke:#94a3b8;stroke-width:1.5;}
-.node-box-soft{fill:#ffffff;stroke:#a5b4fc;stroke-width:1.5;}
-.node-header{fill:#e0e7ff;stroke:#94a3b8;stroke-width:1.5;}
-.node-header-soft{fill:#ede9fe;stroke:#a78bfa;stroke-width:1.5;}
-.node-title{font-family:${FONT};font-size:14px;font-weight:600;fill:#1e293b;}
-.node-title-sm{font-family:${FONT};font-size:12.5px;font-weight:600;fill:#1e293b;}
-.node-member{font-family:${FONT};font-size:12.5px;fill:#475569;}
-.node-actor-label{font-family:${FONT};font-size:13px;font-weight:600;fill:#1e293b;}
-.usecase-ellipse{fill:#f5f3ff;stroke:#8b5cf6;stroke-width:1.5;}
-.actor-line{stroke:#334155;stroke-width:1.8;fill:none;}
-.actor-head{fill:#ffffff;stroke:#334155;stroke-width:1.8;}
-.act-round{fill:#ecfeff;stroke:#0891b2;stroke-width:1.6;rx:22;}
-.act-diamond{fill:#fef3c7;stroke:#d97706;stroke-width:1.6;}
-.act-start{fill:#0f172a;stroke:#0f172a;stroke-width:1.6;}
-.swimlane-h{fill:rgba(224,242,254,0.4);stroke:none;}
-.swimlane-v{fill:rgba(236,253,245,0.45);stroke:none;}
-.swimlane-bar-h{fill:rgba(14,165,233,0.55);}
-.swimlane-bar-v{fill:rgba(16,185,129,0.55);}
-.swimlane-sep-h{stroke:#0ea5e9;stroke-width:2;}
-.swimlane-sep-v{stroke:#10b981;stroke-width:2;}
-.swimlane-title{font-family:${FONT};font-size:15px;font-weight:700;fill:#0369a1;letter-spacing:1px;}
-.act-stop{fill:#ffffff;stroke:#0f172a;stroke-width:2.4;}
-.act-text{font-family:${FONT};font-size:13px;fill:#0f172a;}
-.act-text-sm{font-family:${FONT};font-size:11.5px;fill:#78350f;}
-.state-round{fill:#f0fdf4;stroke:#16a34a;stroke-width:1.6;}
-.state-pseudo{fill:#0f172a;stroke:#0f172a;}
-.edge-line{stroke:#64748b;stroke-width:1.5;fill:none;stroke-linecap:round;}
-.edge-dashed{stroke-dasharray:7 5;}
-.edge-label{font-family:${FONT};font-size:12px;fill:#475569;}
-.edge-label-bg{fill:#ffffff;opacity:.92;}
-.arrow-fill{fill:#64748b;}
-.arrow-line{stroke:#64748b;stroke-width:1.5;fill:none;stroke-linecap:round;}
-.diamond-fill{fill:#64748b;stroke:#64748b;stroke-width:1;}
-.diamond-open{fill:#ffffff;stroke:#64748b;stroke-width:1.6;}
-/* E-R 关系端点（鸦爪）：与 arrow-line 同色，保证各类连线观感统一 */
-.er-bar{stroke:#64748b;stroke-width:1.6;stroke-linecap:round;}
-.er-circle{fill:#ffffff;stroke:#64748b;stroke-width:1.5;}
-.er-foot{stroke:#64748b;stroke-width:1.5;fill:none;stroke-linecap:round;stroke-linejoin:round;}
-.title-text{font-family:${FONT};font-size:19px;font-weight:700;fill:#1e293b;}
-.mult-text{font-family:${FONT};font-size:11.5px;fill:#334155;}
-.seq-box{fill:#eef2ff;stroke:#6366f1;stroke-width:1.6;}
-.seq-box-actor{fill:#fff7ed;stroke:#f97316;}
-.seq-life{stroke:#c7d2fe;stroke-width:1.5;stroke-dasharray:5 5;}
-.seq-msg{stroke:#334155;stroke-width:1.6;fill:none;}
-.seq-msg-dashed{stroke-dasharray:7 5;}
-.seq-msg-text{font-family:${FONT};font-size:12.5px;fill:#1e293b;}
-.seq-msg-sync{font-weight:600;}
-.seq-actor-text{font-family:${FONT};font-size:13px;font-weight:600;fill:#312e81;}
-.seq-arrow-open{stroke:#334155;stroke-width:1.5;fill:none;stroke-linecap:round;stroke-linejoin:round;}
-.seq-glyph{stroke:#475569;stroke-width:1.6;fill:none;stroke-linecap:round;}
-.control-arrow{stroke:#475569;stroke-width:1.8;fill:none;stroke-linecap:round;}
-.boundary-circle{stroke:#475569;stroke-width:1.6;fill:#ffffff;}
-.seq-glyph-ellipse{stroke:#475569;stroke-width:1.6;}
-.seq-stereo{font-family:${FONT};font-size:10px;fill:#64748b;letter-spacing:0.5px;}
-.seq-create-tag{font-family:${FONT};font-size:11px;fill:#0f766e;font-style:italic;}
-.seq-activation{fill:#e0e7ff;stroke:#6366f1;stroke-width:1.5;}
-.seq-frag{fill:#f8fafc;fill-opacity:0.55;stroke:#64748b;stroke-width:1.3;stroke-dasharray:6 4;}
-.seq-frag-tag{fill:#e2e8f0;stroke:#475569;stroke-width:1;stroke-dasharray:none;}
-.seq-frag-tag-text{font-family:${FONT};font-size:11.5px;font-weight:700;fill:#334155;}
-.seq-frag-sep{stroke:#94a3b8;stroke-width:1.2;stroke-dasharray:none;}
-.seq-frag-sep-text{font-family:${FONT};font-size:10.5px;fill:#475569;font-style:italic;}
-.hit{fill:transparent;pointer-events:all;}
-`;
-
-// 生成画布内联样式：所有 font-size 统一乘 uiFontScale，实现字号滑块动态调整
-function svgStyle() {
-  return SVG_CSS.replace(/font-size:([\d.]+)px/g, (m, n) => `font-size:${(parseFloat(n) * uiFontScale).toFixed(1)}px`);
-}
 
 function clipPoint(n, tx, ty) {
   const cx = n.x, cy = n.y;
@@ -100,18 +34,23 @@ function anchorOffset(node, px, py) {
   return { dx: bp.x - node.x, dy: bp.y - node.y };
 }
 
+/* 实心三角形箭头的三个顶点：类图连线与顺序图共用同一套比例（尖锐度一致） */
+const ARROW_LEN = 11, ARROW_SPREAD = 0.36;
+function arrowTrianglePoints(tipX, tipY, angle) {
+  const p1 = { x: tipX - ARROW_LEN * Math.cos(angle - ARROW_SPREAD), y: tipY - ARROW_LEN * Math.sin(angle - ARROW_SPREAD) };
+  const p2 = { x: tipX - ARROW_LEN * Math.cos(angle + ARROW_SPREAD), y: tipY - ARROW_LEN * Math.sin(angle + ARROW_SPREAD) };
+  return `${tipX},${tipY} ${p1.x},${p1.y} ${p2.x},${p2.y}`;
+}
+
 function addArrowHead(g, tip, angle, kind) {
-  const size = 11;
   if (kind === 'triangle') {
-    const p1 = { x: tip.x - size * Math.cos(angle - 0.36), y: tip.y - size * Math.sin(angle - 0.36) };
-    const p2 = { x: tip.x - size * Math.cos(angle + 0.36), y: tip.y - size * Math.sin(angle + 0.36) };
     g.appendChild(el('polygon', {
-      points: `${tip.x},${tip.y} ${p1.x},${p1.y} ${p2.x},${p2.y}`,
+      points: arrowTrianglePoints(tip.x, tip.y, angle),
       class: 'arrow-fill'
     }));
   } else if (kind === 'open') {
-    const p1 = { x: tip.x - size * Math.cos(angle - 0.42), y: tip.y - size * Math.sin(angle - 0.42) };
-    const p2 = { x: tip.x - size * Math.cos(angle + 0.42), y: tip.y - size * Math.sin(angle + 0.42) };
+    const p1 = { x: tip.x - ARROW_LEN * Math.cos(angle - 0.42), y: tip.y - ARROW_LEN * Math.sin(angle - 0.42) };
+    const p2 = { x: tip.x - ARROW_LEN * Math.cos(angle + 0.42), y: tip.y - ARROW_LEN * Math.sin(angle + 0.42) };
     g.appendChild(el('polyline', {
       points: `${p1.x},${p1.y} ${tip.x},${tip.y} ${p2.x},${p2.y}`,
       class: 'arrow-line'
@@ -175,7 +114,7 @@ function addCrowsFoot(g, tip, angle, kind) {
 
 function drawEdgeLabel(g, x, y, text) {
   if (!text) return;
-  const w = textWidth(text, 12) + 10;
+  const w = textWidth(text, T.edgeLabelSize) + 10;
   g.appendChild(el('rect', { x: x - w / 2, y: y - 10, width: w, height: 16, rx: 4, class: 'edge-label-bg' }));
   g.appendChild(el('text', { x, y: y + 1, 'text-anchor': 'middle', class: 'edge-label' }, text));
 }
@@ -329,7 +268,7 @@ function actorGlyph(cx, top, { headR = 11, label, labelY, labelClass = 'node-act
 function iconControl(cx, cyc, R, label) {
   const tipX = cx - 2, tipY = cyc - R - 1;
   return [
-    el('circle', { cx, cy: cyc, r: R + 1, class: 'seq-glyph', fill: 'none' }),
+    el('circle', { cx, cy: cyc, r: R + 1, class: 'seq-glyph' }),
     el('line', { x1: tipX, y1: tipY, x2: tipX + 5, y2: tipY - 4, class: 'control-arrow' }),
     el('line', { x1: tipX, y1: tipY, x2: tipX + 5, y2: tipY + 4, class: 'control-arrow' }),
     el('text', { x: cx, y: cyc + 36, class: 'seq-actor-text', 'text-anchor': 'middle' }, label)
@@ -338,7 +277,7 @@ function iconControl(cx, cyc, R, label) {
 // 实体类：圆 + 底部横线
 function iconEntity(cx, cyc, R, label) {
   return [
-    el('circle', { cx, cy: cyc, r: R, class: 'seq-glyph', fill: 'none' }),
+    el('circle', { cx, cy: cyc, r: R, class: 'seq-glyph' }),
     el('line', { x1: cx - R, y1: cyc + R, x2: cx + R, y2: cyc + R, class: 'actor-line' }),
     el('text', { x: cx, y: cyc + 36, class: 'seq-actor-text', 'text-anchor': 'middle' }, label)
   ];
@@ -347,7 +286,7 @@ function iconEntity(cx, cyc, R, label) {
 function iconBoundary(cx, cyc, R, label) {
   const Lx = cx - R - 6;
   return [
-    el('circle', { cx, cy: cyc, r: R, class: 'seq-glyph', fill: 'none' }),
+    el('circle', { cx, cy: cyc, r: R, class: 'seq-glyph' }),
     el('line', { x1: Lx, y1: cyc - R, x2: Lx, y2: cyc + R, class: 'actor-line' }),
     el('line', { x1: Lx, y1: cyc, x2: cx - R, y2: cyc, class: 'actor-line' }),
     el('text', { x: cx, y: cyc + 36, class: 'seq-actor-text', 'text-anchor': 'middle' }, label)
@@ -356,36 +295,18 @@ function iconBoundary(cx, cyc, R, label) {
 
 /* ---------------- 节点绘制 ---------------- */
 
-/* ================= 节点配色资源（NODE_THEME）================= */
-/* 将各图形散落的颜色/尺寸收敛为可复用的"静态资源"，便于统一修改与复用 */
-const NODE_THEME = {
-  package: {
-    bodyFill: '#fffbeb', bodyEdge: '#f59e0b', gapLine: '#fffbeb',
-    tabFill: '#fde68a', tabEdge: '#f59e0b', seamLine: '#fde68a',
-    edgeFill: '#f59e0b', titleFill: '#92400e', memberFill: '#78350f'
-  },
-  node3d: {
-    dep: 8, headH: 30, topFill: '#d1fae5', sideFill: '#a7f3d0', faceFill: '#ecfdf5',
-    edge: '#10b981', titleFill: '#065f46', memberFill: '#064e3b'
-  },
-  artifact: {
-    fold: 16, headH: 28, faceFill: '#fff7ed', edge: '#f97316',
-    foldFill: '#fed7aa', titleFill: '#9a3412', memberFill: '#7c2d12'
-  },
-  database: {
-    bodyFill: '#f0fdfa', capFill: '#ccfbf1', edge: '#14b8a6', titleFill: '#134e4a'
-  },
-  notice: {
-    fold: 16, faceBg: '#fefce8', edge: '#eab308', shadowFill: '#fef08a',
-    titleFill: '#713f12', memberFill: '#713f12'
-  },
-  component: {
-    headH: 34, bodyFill: '#f5f3ff', headFill: '#ede9fe', edge: '#8b5cf6',
-    iconFill: '#a78bfa', titleFill: '#5b21b6', memberFill: '#4c1d95'
-  },
-  box: {
-    headH: 34, edge: '#94a3b8', erMemberFill: '#1e293b'
-  }
+/* ================= 几何常量（GEOM）================= */
+/* 只描述尺寸与偏移这类「结构」参数；颜色 / 字体 / 线宽一律来自主题 token（T.*） */
+const GEOM = {
+  pkgTabH: 22,          // 包：标签页高度
+  pkgTabPad: 28,        // 包：标签宽度 = 文字宽 + 该留白
+  n3dDepth: 8,          // 部署节点：立体深度
+  n3dHeadH: 30,         // 部署节点：标题行高
+  artFold: 16,          // 构件：折角大小
+  artHeadH: 28,         // 构件：标题行高
+  boxHeadH: 34,         // 类框：标题行高
+  memberRowH: 18,       // 成员行距
+  erRowH: 20            // E-R 字段行距（字段含括号类型，行距略大）
 };
 
 /* ================= 可复用构件 ================= */
@@ -400,8 +321,12 @@ function memberList(g, x, y, mems, fill, rowH = 18) {
   });
 }
 // 业务元素标记：与主体同色的实线斜杠，方向从左下到右上（区分普通模型与业务模型，复用于各图形）
-function bizSlash(x1, y1, x2, y2, color, weight = 2.2) {
-  return el('line', { x1, y1, x2, y2, stroke: color || '#475569', 'stroke-width': weight});
+function bizSlash(x1, y1, x2, y2, color, weight) {
+  return el('line', {
+    x1, y1, x2, y2,
+    stroke: color || T.bizSlash,
+    'stroke-width': weight == null ? T.bizSlashSW : weight
+  });
 }
 
 /* ================= 各图形节点构建器 ================= */
@@ -439,7 +364,7 @@ function usecaseNode(g, n, x, y) {
       g.appendChild(e);
     }
     if (n.kind === 'businessactor') {
-      g.appendChild(bizSlash(n.x - 2, y + 26, n.x + 10, y + 10, '#334155', 2));
+      g.appendChild(bizSlash(n.x - 2, y + 26, n.x + 10, y + 10, T.bizActorSlash, T.bizActorSlashSW));
     }
     return;
   }
@@ -448,7 +373,8 @@ function usecaseNode(g, n, x, y) {
     x: n.x, y: n.y + 5, 'text-anchor': 'middle', class: 'node-title-sm'
   }, n.label));
   if (n.kind === 'businessusecase') {
-    g.appendChild(bizSlash(n.x - n.w / 2 * 0.1, n.y + n.h / 2, n.x + n.w / 2 , n.y - n.h / 2 * 0.1, '#8b5cf6', 1.5));
+    g.appendChild(bizSlash(n.x - n.w / 2 * 0.1, n.y + n.h / 2, n.x + n.w / 2 , n.y - n.h / 2 * 0.1,
+      T.bizUsecaseSlash, T.bizUsecaseSlashSW));
   }
 }
 
@@ -466,192 +392,185 @@ function stateNode(g, n, x, y) {
 
 // 包图 - Folder 标签样式
 function packageNode(g, n, x, y) {
-  const t = NODE_THEME.package;
-  const tabW = Math.min(textWidth(n.label, 13, '600') + 28, n.w * 0.55);
-  const tabH = 22;
+  const tabH = GEOM.pkgTabH;
+  const tabW = Math.min(textWidth(n.label, T.titleSmSize, T.titleSmWeight) + GEOM.pkgTabPad, n.w * 0.55);
   // 主体矩形（顶部不设圆角，用细线封住缺口）
   g.appendChild(el('rect', {
     x, y: y + tabH, width: n.w, height: n.h - tabH, rx: 5,
-    fill: t.bodyFill, stroke: t.bodyEdge, 'stroke-width': 1.5
+    fill: T.pkgFill, stroke: T.pkgStroke, 'stroke-width': T.pkgSW
   }));
   // 左侧缺口遮盖线
-  g.appendChild(lineAt(x, y + tabH + 1, x + 4, y + tabH + 1, t.gapLine, 1.5));
+  g.appendChild(lineAt(x, y + tabH + 1, x + 4, y + tabH + 1, T.pkgGapLine, T.pkgSW));
   // 标签（左上角凸出的矩形）
   g.appendChild(el('rect', {
     x, y, width: tabW, height: tabH, rx: 4,
-    fill: t.tabFill, stroke: t.tabEdge, 'stroke-width': 1.5
+    fill: T.pkgTabFill, stroke: T.pkgTabStroke, 'stroke-width': T.pkgSW
   }));
   // 标签与主体之间的连接（用一条线遮盖接缝）
-  g.appendChild(lineAt(x, y + tabH, x + tabW, y + tabH, t.seamLine, 2));
+  g.appendChild(lineAt(x, y + tabH, x + tabW, y + tabH, T.pkgSeam, 2));
   // 主体右边和底边补齐（盖住圆角过渡）
   g.appendChild(el('rect', {
     x: x + tabW - 5, y: y + tabH, width: n.w - tabW + 5, height: 1.5,
-    fill: t.edgeFill
+    fill: T.pkgEdgeFill
   }));
   g.appendChild(el('text', {
     x: x + 12, y: y + tabH - 5, 'text-anchor': 'start', class: 'node-title-sm',
-    fill: t.titleFill
+    fill: T.pkgTitleFill
   }, n.label));
   // 包内成员显示在主体中
-  memberList(g, x + 14, y + tabH + 22, n.members, t.memberFill);
+  memberList(g, x + 14, y + tabH + 22, n.members, T.pkgMemberFill);
 }
 
 // 部署图 node - 3D 立体盒子
 function deploymentNode(g, n, x, y) {
-  const t = NODE_THEME.node3d;
-  const dep = t.dep;            // 3D 深度
+  const dep = GEOM.n3dDepth;    // 3D 深度
   const fw = n.w - dep;         // 正面宽度（碰撞区域包含 3D 深度）
   const fh = n.h - dep;         // 正面高度
-  const headH = t.headH;
+  const headH = GEOM.n3dHeadH;
   // 顶面（上侧平行四边形）
   g.appendChild(el('polygon', {
     points: `${x + dep},${y + dep} ${x + n.w},${y + dep} ${x + fw},${y} ${x},${y}`,
-    fill: t.topFill, stroke: t.edge, 'stroke-width': 1
+    fill: T.n3dTopFill, stroke: T.n3dStroke, 'stroke-width': T.n3dSW
   }));
   // 右面（右侧平行四边形）
   g.appendChild(el('polygon', {
     points: `${x + fw},${y} ${x + n.w},${y + dep} ${x + n.w},${y + n.h} ${x + fw},${y + fh}`,
-    fill: t.sideFill, stroke: t.edge, 'stroke-width': 1
+    fill: T.n3dSideFill, stroke: T.n3dStroke, 'stroke-width': T.n3dSW
   }));
   // 底部面（底部平行四边形）
   g.appendChild(el('polygon', {
     points: `${x},${y + fh} ${x + fw},${y + fh} ${x + n.w},${y + n.h} ${x + dep},${y + n.h}`,
-    fill: t.topFill, stroke: t.edge, 'stroke-width': 1
+    fill: T.n3dTopFill, stroke: T.n3dStroke, 'stroke-width': T.n3dSW
   }));
   // 正面（主矩形）
   g.appendChild(el('polygon', {
     points: `${x},${y} ${x + fw},${y} ${x + fw},${y + fh} ${x},${y + fh}`,
-    fill: t.faceFill, stroke: t.edge, 'stroke-width': 1.5
+    fill: T.n3dFaceFill, stroke: T.n3dStroke, 'stroke-width': T.n3dFaceSW
   }));
   // 标题行
-  g.appendChild(lineAt(x, y + headH, x + fw, y + headH, t.edge, 1));
+  g.appendChild(lineAt(x, y + headH, x + fw, y + headH, T.n3dStroke, T.n3dSW));
   g.appendChild(el('text', {
     x: n.x - dep / 2, y: y + headH - 9, 'text-anchor': 'middle', class: 'node-title-sm',
-    fill: t.titleFill
+    fill: T.n3dTitleFill
   }, `«node» ${n.label}`));
-  memberList(g, x + 12, y + headH + 18, n.members, t.memberFill);
+  memberList(g, x + 12, y + headH + 18, n.members, T.n3dMemberFill);
 }
 
 // artifact - 文档图标样式
 function artifactNode(g, n, x, y) {
-  const t = NODE_THEME.artifact;
-  const { fold, headH } = t;
+  const fold = GEOM.artFold, headH = GEOM.artHeadH;
   g.appendChild(el('rect', {
     x, y, width: n.w, height: n.h, rx: 4,
-    fill: t.faceFill, stroke: t.edge, 'stroke-width': 1.5
+    fill: T.artFaceFill, stroke: T.artStroke, 'stroke-width': T.artSW
   }));
   // 右上角折角装饰
   g.appendChild(el('path', {
     d: `M${x + n.w - fold},${y} L${x + n.w},${y + fold}`,
-    stroke: t.edge, 'stroke-width': 1.5, fill: 'none'
+    stroke: T.artStroke, 'stroke-width': T.artSW, fill: 'none'
   }));
   g.appendChild(el('polygon', {
     points: `${x + n.w - fold},${y} ${x + n.w},${y} ${x + n.w},${y + fold}`,
-    fill: t.foldFill
+    fill: T.artFoldFill
   }));
   // 标题
   g.appendChild(el('line', {
     x1: x + 8, y1: y + headH, x2: x + n.w - 8, y2: y + headH,
-    stroke: t.edge, 'stroke-width': 0.8, 'stroke-dasharray': '4 3'
+    stroke: T.artStroke, 'stroke-width': T.artSepSW, 'stroke-dasharray': '4 3'
   }));
   g.appendChild(el('text', {
     x: x + 12, y: y + headH - 7, 'text-anchor': 'start', class: 'node-title-sm',
-    fill: t.titleFill
+    fill: T.artTitleFill
   }, `«artifact» ${n.label}`));
-  memberList(g, x + 12, y + headH + 18, n.members, t.memberFill);
+  memberList(g, x + 12, y + headH + 18, n.members, T.artMemberFill);
 }
 
 // database - 圆柱体
 function databaseNode(g, n, x, y) {
-  const t = NODE_THEME.database;
   const r = n.w / 2;
   const cy2 = y + n.h;
   const cy1 = y + 16;
   // 主体（四肢路径：矩形 + 底部椭圆露出）
   g.appendChild(el('path', {
     d: `M ${x},${cy1} L ${x},${cy2 - 10} A ${r} 10 0 0 0 ${x + n.w},${cy2 - 10} L ${x + n.w},${cy1}`,
-    fill: t.bodyFill, stroke: t.edge, 'stroke-width': 1.5
+    fill: T.dbBodyFill, stroke: T.dbStroke, 'stroke-width': T.dbSW
   }));
   // 顶部椭圆
   g.appendChild(el('ellipse', {
     cx: n.x, cy: cy1, rx: r, ry: 10,
-    fill: t.capFill, stroke: t.edge, 'stroke-width': 1.5
+    fill: T.dbCapFill, stroke: T.dbStroke, 'stroke-width': T.dbSW
   }));
   // 底部弧线
   g.appendChild(el('path', {
     d: `M ${x},${cy2 - 10} A ${r} 10 0 0 0 ${x + n.w},${cy2 - 10}`,
-    fill: 'none', stroke: t.edge, 'stroke-width': 1.5
+    fill: 'none', stroke: T.dbStroke, 'stroke-width': T.dbSW
   }));
   // 标题
   g.appendChild(el('text', {
     x: n.x, y: cy1 + 3, 'text-anchor': 'middle', class: 'node-title-sm',
-    fill: t.titleFill
+    fill: T.dbTitleFill
   }, n.label));
 }
 
 // notice - 便签框（折角）
 function noticeNode(g, n, x, y) {
-  const t = NODE_THEME.notice;
-  const fold = t.fold; // 折角大小
+  const fold = GEOM.artFold; // 折角大小
   g.appendChild(el('polygon', {
     points: `${x},${y} ${x + n.w - fold},${y} ${x + n.w},${y + fold} ${x + n.w},${y + n.h} ${x},${y + n.h}`,
-    fill: t.faceBg, stroke: t.edge, 'stroke-width': 1.5
+    fill: T.noteFaceFill, stroke: T.noteStroke, 'stroke-width': T.artSW
   }));
   // 折角折痕线
-  g.appendChild(lineAt(x + n.w - fold, y, x + n.w, y + fold, t.edge, 1.5));
+  g.appendChild(lineAt(x + n.w - fold, y, x + n.w, y + fold, T.noteStroke, T.artSW));
   // 折角阴影三角形
   g.appendChild(el('polygon', {
     points: `${x + n.w - fold},${y} ${x + n.w - fold + 4},${y + 4} ${x + n.w},${y + fold}`,
-    fill: t.shadowFill, stroke: 'none', opacity: 0.5
+    fill: T.noteFoldShadow, stroke: 'none', opacity: 0.5
   }));
   // 标题与内容
   g.appendChild(el('text', {
     x: x + 12, y: y + 18, 'text-anchor': 'start', class: 'node-title-sm',
-    fill: t.titleFill
+    fill: T.noteTitleFill
   }, n.label));
-  memberList(g, x + 12, y + 40, n.members, t.memberFill); // 首行成员 = 标题 18 + 4 + 18
+  memberList(g, x + 12, y + 40, n.members, T.noteMemberFill); // 首行成员 = 标题 18 + 4 + 18
 }
 
 // component - 带组件图标的标题栏
 function componentNode(g, n, x, y) {
-  const t = NODE_THEME.component;
-  const headH = t.headH;
+  const headH = GEOM.boxHeadH;
   const iconX = x + 10, iconY = y + 7;
   g.appendChild(el('rect', {
     x, y, width: n.w, height: n.h, rx: 6,
-    fill: t.bodyFill, stroke: t.edge, 'stroke-width': 1.5
+    fill: T.cmpBodyFill, stroke: T.cmpStroke, 'stroke-width': T.cmpSW
   }));
   g.appendChild(el('rect', {
     x, y, width: n.w, height: headH,
-    fill: t.headFill, stroke: t.edge, 'stroke-width': 1.5
+    fill: T.cmpHeadFill, stroke: T.cmpHeadStroke, 'stroke-width': T.cmpSW
   }));
   g.appendChild(el('rect', {
     x, y: y + headH - 8, width: n.w, height: 8,
-    fill: t.headFill, stroke: 'none'
+    fill: T.cmpHeadFill, stroke: 'none'
   }));
-  g.appendChild(lineAt(x, y + headH, x + n.w, y + headH, t.edge, 1));
+  g.appendChild(lineAt(x, y + headH, x + n.w, y + headH, T.cmpStroke, T.cmpSW));
   // 组件小图标（两个小矩形在左侧）
   g.appendChild(el('rect', {
     x: iconX, y: iconY, width: 8, height: 8, rx: 1.5,
-    fill: t.iconFill, stroke: 'none'
+    fill: T.cmpIconFill, stroke: 'none'
   }));
   g.appendChild(el('rect', {
     x: iconX, y: iconY + 10, width: 8, height: 8, rx: 1.5,
-    fill: t.iconFill, stroke: 'none'
+    fill: T.cmpIconFill, stroke: 'none'
   }));
   // 标题
   g.appendChild(el('text', {
     x: iconX + 18, y: y + 22, 'text-anchor': 'start', class: 'node-title',
-    fill: t.titleFill
+    fill: T.cmpTitleFill
   }, n.label));
   // 成员
-  memberList(g, x + 12, y + headH + 20, n.members, t.memberFill);
+  memberList(g, x + 12, y + headH + 20, n.members, T.cmpMemberFill);
 }
 
 // 默认矩形框（类图等）- 包含属性和方法分栏
 function defaultBoxNode(g, n, x, y, type) {
-  const t = NODE_THEME.box;
-  const headH = t.headH;
+  const headH = GEOM.boxHeadH;
   const kwMap = { abstract: '«abstract»\n ', interface: '«interface» ', enum: '«enum» ' };
   const kw = kwMap[n.kind] || '';
 
@@ -663,13 +582,12 @@ function defaultBoxNode(g, n, x, y, type) {
     x, y, width: n.w, height: headH,
     class: 'node-header'
   }));
-  g.appendChild(lineAt(x, y + headH, x + n.w, y + headH, t.edge, 1));
+  g.appendChild(lineAt(x, y + headH, x + n.w, y + headH, T.boxStroke, T.boxLineSW));
 
   if (kw) {
     // 两行标题：第一行「标识」，第二行「类名」
     g.appendChild(el('text', {
-      x: n.x, y: y + 16, 'text-anchor': 'middle', 'font-size': 11,
-      class: 'node-title', fill: t.memberFill
+      x: n.x, y: y + 16, 'text-anchor': 'middle', class: 'node-stereo'
     }, kw.trim()));
     g.appendChild(el('text', {
       x: n.x, y: y + 31, 'text-anchor': 'middle', class: 'node-title'
@@ -684,7 +602,7 @@ function defaultBoxNode(g, n, x, y, type) {
 
   // E-R 图实体：字段含 VARCHAR(200)、DECIMAL(10,2) 等括号内容，不做属性/方法分栏
   if (type === 'er') {
-    memberList(g, x + 12, y + headH + 20, mems, t.erMemberFill, 20);
+    memberList(g, x + 12, y + headH + 20, mems, T.erMemberFill, GEOM.erRowH);
     return;
   }
 
@@ -696,7 +614,7 @@ function defaultBoxNode(g, n, x, y, type) {
     if (!isMeth(m)) {
       // 属性
       g.appendChild(el('text', {
-        x: x + 12, y: y + sepY + attrIdx * 18, class: 'node-member'
+        x: x + 12, y: y + sepY + attrIdx * GEOM.memberRowH, class: 'node-member'
       }, m));
       attrIdx++;
     }
@@ -704,15 +622,15 @@ function defaultBoxNode(g, n, x, y, type) {
 
   // 属性和方法之间的分隔线
   if (n._hasSep) {
-    const sy = y + sepY + n._attrCount * 18 + 4;
-    g.appendChild(lineAt(x, sy - 8, x + n.w, sy - 8, t.edge, 2));
+    const sy = y + sepY + n._attrCount * GEOM.memberRowH + 4;
+    g.appendChild(lineAt(x, sy - 8, x + n.w, sy - 8, T.boxStroke, T.boxAttrSepSW));
   }
 
   for (const m of mems) {
     if (isMeth(m)) {
       // 方法
       const mi = methIdx;
-      const my = y + sepY + n._attrCount * 18 + (n._hasSep ? 16 : 0) + mi * 18;
+      const my = y + sepY + n._attrCount * GEOM.memberRowH + (n._hasSep ? 16 : 0) + mi * GEOM.memberRowH;
       g.appendChild(el('text', {
         x: x + 12, y: my, class: 'node-member'
       }, m));
@@ -816,17 +734,17 @@ function renderActivityContainers(root, model) {
     const a = model.activityEdge;
     const box = el('g');
     box.appendChild(el('rect', {
-      x: a.x, y: a.y, width: a.w, height: a.h, rx: 10,
-      fill: 'rgba(248,250,255,0.55)', stroke: '#4f46e5',
-      'stroke-width': 1.5, 'stroke-dasharray': 'none'
+      x: a.x, y: a.y, width: a.w, height: a.h, rx: T.frameRx,
+      fill: T.actEdgeFill, stroke: T.actEdgeStroke,
+      'stroke-width': T.frameSW, 'stroke-dasharray': 'none'
     }));
-    const lblW = textWidth(a.label, 13, '600') + 24;
+    const lblW = textWidth(a.label, T.titleSmSize, T.titleSmWeight) + 24;
     box.appendChild(el('rect', {
       x: a.x + 14, y: a.y - 11, width: lblW, height: 22, rx: 4,
-      fill: '#f8faff', stroke: 'none'
+      fill: T.actEdgeLabelBg, stroke: 'none'
     }));
     box.appendChild(el('text', {
-      x: a.x + 26, y: a.y + 4, class: 'node-title-sm', fill: '#4338ca'
+      x: a.x + 26, y: a.y + 4, class: 'node-title-sm', fill: T.actEdgeLabelFill
     }, a.label));
     addContainerHandles(box, 'activityEdge', -1, a);
     root.appendChild(box);
@@ -855,26 +773,50 @@ function addContainerHandles(box, ctype, cidx, obj) {
   }));
 }
 
+/* 画布底色：简约配色画一张浅色渐变「纸」（覆盖 fitView 的可见范围）；
+   色彩配色 token 为空字符串，什么都不画，露出页面网格。 */
+function appendCanvasBackdrop(root, model) {
+  if (!T.canvasFill) return;
+  const minX = model.layoutMinX || 0;
+  const minY = model.layoutMinY || 0;
+  const w = (model.contentW || 0) - minX;
+  const h = (model.contentH || 0) - minY;
+  if (!(w > 0 && h > 0)) return;
+  root.appendChild(el('rect', { x: minX, y: minY, width: w, height: h, fill: T.canvasFill }));
+}
+
+/* 投影只加在「有填充的面」上：火柴小人、伪状态这类纯线条图形投影会糊成一团 */
+function nodeWantsShadow(n, type) {
+  if (!T.shadow) return false;
+  if (type === 'usecase' && (n.kind === 'actor' || n.kind === 'businessactor')) return false;
+  if (n.kind === 'start' || n.kind === 'stop' || n.kind === 'pseudostate') return false;
+  return true;
+}
+
 function buildGraphContent(model) {
   const root = el('g');
   const nodeMap = new Map(model.nodes.map(n => [n.id, n]));
+
+  // 画布底色（简约配色才有：一张浅色渐变纸，随内容一起缩放平移）
+  appendCanvasBackdrop(root, model);
 
   // 绘制用例图系统边界框
   if (model.type === 'usecase' && model.boundary) {
     const b = model.boundary;
     const dash = b.lineStyle === 'solid' ? 'none' : '8 4';
     root.appendChild(el('rect', {
-      x: b.x, y: b.y, width: b.w, height: b.h, rx: 10,
-      fill: '#f4f6ff', stroke: '#6366f1', 'stroke-width': 1.5, 'stroke-dasharray': dash
+      x: b.x, y: b.y, width: b.w, height: b.h, rx: T.frameRx,
+      fill: T.boundaryFill, stroke: T.boundaryStroke,
+      'stroke-width': T.frameSW, 'stroke-dasharray': dash
     }));
-    const lblW = textWidth(b.label, 13, '600') + 20;
+    const lblW = textWidth(b.label, T.titleSmSize, T.titleSmWeight) + 20;
     root.appendChild(el('rect', {
       x: b.x + 14, y: b.y - 11, width: lblW, height: 22, rx: 4,
-      fill: '#f4f6ff', stroke: 'none'
+      fill: T.boundaryLabelBg, stroke: 'none'
     }));
     root.appendChild(el('text', {
       x: b.x + 24, y: b.y + 4,
-      class: 'node-title-sm', fill: '#4338ca'
+      class: 'node-title-sm', fill: T.boundaryLabelFill
     }, b.label));
 
     // 四角大小调整命中区（透明不可见，鼠标移至边界四角处可拖拽调整大小）
@@ -937,6 +879,7 @@ function buildGraphContent(model) {
       class: 'hit'
     }));
     drawNode(gn, n, model.type);
+    if (nodeWantsShadow(n, model.type)) gn.setAttribute('filter', themeShadowURL());
     gNodes.appendChild(gn);
   }
 
@@ -959,10 +902,11 @@ function buildGraphContent(model) {
 // 返回 line/polygon 描述，按方向 dir（1 指向右）朝 x 目标点
 function seqArrowEl(x, y, dir, kind) {
   const out = [];
-  const s = 5.5; // 箭头半高
+  const s = 5.5; // 开口箭头的半高
   if (kind === 'fill') {
+    // 实心箭头：直接复用类图那套三角形（长 11、半张角 0.36），比原来更尖
     out.push(el('polygon', {
-      points: `${x},${y} ${x - dir * (s + 2)},${y + s} ${x - dir * (s + 2)},${y - s}`,
+      points: arrowTrianglePoints(x, y, dir > 0 ? 0 : Math.PI),
       class: 'arrow-fill'
     }));
   } else {
@@ -986,9 +930,11 @@ function seqPartGlyph(p) {
 
   if (p.kind === 'object') {
     // 对象：保留外框，名称居中
-    put([el('rect', {
+    const headBox = el('rect', {
       x: cx - p.w / 2, y: cy - 22, width: p.w, height: 44, rx: 6, class: 'seq-box'
-    }),
+    });
+    if (T.shadow) headBox.setAttribute('filter', themeShadowURL());
+    put([headBox,
     el('text', { x: cx, y: cy + 5, class: 'seq-actor-text', 'text-anchor': 'middle' }, p.label)]);
   } else if (p.kind === 'actor') {
     // 角色：无外框，复刻活动图的火柴小人（headR=6 的小号缩放版），名称置于下方
@@ -999,12 +945,12 @@ function seqPartGlyph(p) {
       put(actorGlyph(cx, figTop, { headR: 2.8, label: p.label, labelY: 52 }));
       let cyc = cy - 4, R = 13;
       put(iconControl(cx, cyc, R));
-      gSeq.appendChild(bizSlash(cx, cyc + R * 1.05 , cx + R * 1.05 , cyc, '#475569',1.8));
+      gSeq.appendChild(bizSlash(cx, cyc + R * 1.05 , cx + R * 1.05 , cyc, T.bizSeqSlash, T.bizSeqSlashSW));
 
   }else {
     // 控制类 / 实体类 / 边界类：无外框，标准 UML 版型图标 + 名称
     const cyc = cy - 4, R = 13;
-    const biz = () => bizSlash(cx, cyc + R * 1.05 , cx + R * 1.05 , cyc, '#475569',1.8);
+    const biz = () => bizSlash(cx, cyc + R * 1.05 , cx + R * 1.05 , cyc, T.bizSeqSlash, T.bizSeqSlashSW);
     if (p.kind === 'control' || p.kind === 'buscontrol') {
       put(iconControl(cx, cyc, R, p.label));
       if (p.kind === 'buscontrol') gSeq.appendChild(biz());
@@ -1092,6 +1038,9 @@ function buildSequenceContent(model) {
   const W = model.contentW;
   const H = model.contentH;
 
+  // 画布底色（简约配色才有）
+  appendCanvasBackdrop(g, model);
+
   if (title) {
     g.appendChild(el('text', {
       x: model.titleX != null ? model.titleX : W / 2, y: model.titleY, 'text-anchor': 'middle',
@@ -1157,9 +1106,13 @@ function buildSequenceContent(model) {
     const topAct = Math.min(a.startY, a.endY);
     const hAct = Math.max(Math.abs(a.endY - a.startY), 8);
     const ag = el('g', { 'data-node-id': 'seq-act-' + i, 'data-seqkind': 'act', 'data-seqidx': i });
-    ag.appendChild(el('rect', {
-      x: cx - w / 2, y: topAct, width: w, height: hAct, class: 'seq-activation'
-    }));
+    // 角色（actor）那一列的激活条 / 焦点单独一套填色，其余参与者共用一套
+    const actCls = part.kind === 'actor' ? 'seq-activation seq-activation-actor' : 'seq-activation';
+    const actRect = el('rect', {
+      x: cx - w / 2, y: topAct, width: w, height: hAct, rx: T.seqActRx, class: actCls
+    });
+    if (T.shadow) actRect.setAttribute('filter', themeShadowURL());
+    ag.appendChild(actRect);
     // 上下端点长度调节手柄（透明命中区）：拖顶点/底点单独调整激活条的起止
     const EDGE = 10;
     ag.appendChild(el('rect', {
@@ -1179,7 +1132,7 @@ function buildSequenceContent(model) {
         const my = msg ? msg.y : (topAct + 20);
         ag.appendChild(el('rect', {
           x: cx - w / 2 + w - SW - 1, y: my + 15, width: SW * 2, height: SW * 2,
-          class: 'seq-activation'
+          rx: T.seqActRx, class: actCls
         }));
       }
     }

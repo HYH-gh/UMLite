@@ -199,6 +199,7 @@ Data @ (620, 529) 140 62
 
   '顺序图 · 订货处理': 
 `
+
 @diagram sequence "订货处理的顺序图"
 
 actor 采购员
@@ -211,110 +212,76 @@ control 订单货品
 control 订单
 object 财务系统
 
-采购员 -> 商务管理界面 : 订货() 
-activate 采购员
-activate 商务管理界面
-
-商务管理界面 -> 订货管理器 : 订货()
-deactivate 商务管理界面 
-
-activate 订货管理器
+采购员 ->* 商务管理界面 : 订货() 
+商务管理界面 ->* 订货管理器 : 订货()
 订货管理器 ->* 订单 : 创建订单 (订单编号，订货日期，采购员)
-activate 订单
-deactivate 订单
+订货管理器 --> 订货界面 : 弹出订货界面()
 
-订货管理器 ->* 订货界面 : 弹出订货界面()
-activate 订货界面
-deactivate 订货界面
-
-采购员 -> 订货界面 : 客户信息() 
-activate 订货界面
-订货界面 -> 订货管理器 : 接收客户信息()
-
+采购员 ->* 订货界面 : 客户信息() 
+订货界面 ->* 订货管理器 : 接收客户信息()
 订货管理器 ->* 客户 : 创建客户()
-activate 客户
-deactivate 客户
-deactivate 订货管理器
-deactivate 订货界面
 
 loop
-    采购员 -> 订货界面 : 选择货品 (货品编号) 
-    activate 订货界面
-    
-    订货界面 -> 订货管理器 : 选择货品 (货品编号)
-    activate 订货管理器
-    
-    订货管理器 -> 货品 : 取货品信息 (货品编号)
-    activate 货品
+    采购员 ->* 订货界面 : 选择货品 (货品编号) 
+    订货界面 ->* 订货管理器 : 选择货品 (货品编号)
+    订货管理器 ->* 货品 : 取货品信息 (货品编号)
     货品 --> 订货管理器 : 货品信息()
-    deactivate 货品
     
     订货管理器 ->* 订单货品 : 创建订单货品 (货品编号，订单编号，数量)
-    activate 订单货品
-    deactivate 订单货品
-    activate 订货界面
     订货管理器 --> 订货界面 : 显示货品信息()
-    deactivate 订货管理器
-    deactivate 订货界面
 end
 
-采购员 -> 订货界面 : 付款 (账户，金额)
-activate 订货界面
-activate 订货管理器
-订货界面 -> 订货管理器 : 付款 (账户，金额)
-activate 财务系统
-订货管理器 -> 财务系统 : 付款 (账户，金额)
-deactivate 财务系统
-deactivate 订货界面
-deactivate 订货管理器
-deactivate 采购员
-activate 订货管理器
-deactivate 订货管理器
+采购员 ->* 订货界面 : 付款 (账户，金额)
+订货界面 ->* 订货管理器 : 付款 (账户，金额)
+订货管理器 ->* 财务系统 : 付款 (账户，金额)
 
 @layout
-lifeBottom 933
-participant 采购员 @ (425, 99) 112 64
-participant 商务管理界面 @ (533, 94) 120 64
-participant 订货界面 @ (639, 96) 120 64
-participant 订货管理器 @ (750, 100) 133 64
-participant 客户 @ (854, 99) 112 64
-participant 货品 @ (942, 97) 112 64
-participant 订单货品 @ (1025, 96) 120 64
-participant 订单 @ (1117, 97) 112 64
-participant 财务系统 @ (1216, 98) 112 64
-message 0 @ (_, 176)
-message 1 @ (_, 233)
-message 2 @ (_, 308)
-message 3 @ (_, 344)
-message 4 @ (_, 429)
-message 5 @ (_, 456)
-message 6 @ (_, 498)
-message 7 @ (_, 620)
-message 8 @ (_, 644)
-message 9 @ (_, 665)
-message 10 @ (_, 689)
-message 11 @ (_, 740)
-message 12 @ (_, 755)
-message 13 @ (_, 828)
-message 14 @ (_, 846)
-message 15 @ (_, 867)
-activation 0 @ (_, 160) 739
-activation 1 @ (_, 168) 192
-activation 2 @ (_, 218) 141
-activation 3 @ (_, 298) 20
-activation 4 @ (_, 336) 21
-activation 5 @ (_, 422) 108
-activation 6 @ (_, 488) 21
-activation 7 @ (_, 577) 198
-activation 8 @ (_, 576) 192
-activation 9 @ (_, 654) 47
-activation 10 @ (_, 730) 22
-activation 11 @ (_, 815) 79
-activation 12 @ (_, 748) 18
-activation 13 @ (_, 845) 50
-activation 14 @ (_, 856) 18
-activation 15 @ (_, 458) 69
-fragment 0 @ (345, 565) 791 238
+lifeBottom 1038
+participant 采购员 @ (552, 125) 140 96
+participant 商务管理界面 @ (663, 119) 159 96
+participant 订货界面 @ (773, 121) 140 96
+participant 订货管理器 @ (873, 122) 146 96
+participant 客户 @ (955, 120) 140 96
+participant 货品 @ (1023, 120) 140 96
+participant 订单货品 @ (1107, 121) 140 96
+participant 订单 @ (1193, 122) 140 96
+participant 财务系统 @ (1313, 117) 140 96
+message 0 @ (_, 208)
+message 1 @ (_, 248)
+message 2 @ (_, 288)
+message 3 @ (_, 328)
+message 4 @ (_, 368)
+message 5 @ (_, 408)
+message 6 @ (_, 448)
+message 7 @ (_, 528)
+message 8 @ (_, 568)
+message 9 @ (_, 608)
+message 10 @ (_, 648)
+message 11 @ (_, 688)
+message 12 @ (_, 728)
+message 13 @ (_, 808)
+message 14 @ (_, 848)
+message 15 @ (_, 888)
+activation 0 @ (_, 225) 52
+activation 1 @ (_, 368) 40
+activation 2 @ (_, 528) 40
+activation 3 @ (_, 205) 722
+activation 4 @ (_, 208) 80
+activation 5 @ (_, 248) 120
+activation 6 @ (_, 408) 80
+activation 7 @ (_, 568) 200
+activation 8 @ (_, 848) 80
+activation 9 @ (_, 288) 40
+activation 10 @ (_, 328) 120
+activation 11 @ (_, 528) 80
+activation 12 @ (_, 728) 40
+activation 13 @ (_, 808) 80
+activation 14 @ (_, 448) 40
+activation 15 @ (_, 608) 80
+activation 16 @ (_, 688) 40
+activation 17 @ (_, 888) 40
+fragment 0 @ (471, 510) 883 261
+
 
 `,
 
